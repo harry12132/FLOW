@@ -38,17 +38,26 @@ test('difficulty estimate and performance score remain bounded', () => {
   }
 });
 
-test('ambiguity diagnostic reports a bounded result without exceeding its search budget', () => {
-  const puzzle = {
-    size: 2,
+test('ambiguity diagnostic detects multiple valid covers when search is conclusive', () => {
+  const ambiguous = {
+    size: 3,
     segments: [
-      { id: 0, start: { r: 0, c: 0 }, end: { r: 0, c: 1 }, solution: [{ r: 0, c: 0 }, { r: 0, c: 1 }] },
-      { id: 1, start: { r: 1, c: 0 }, end: { r: 1, c: 1 }, solution: [{ r: 1, c: 0 }, { r: 1, c: 1 }] },
+      { id: 0, start: { r: 0, c: 0 }, end: { r: 0, c: 2 }, solution: [{ r: 0, c: 0 }, { r: 0, c: 1 }, { r: 0, c: 2 }] },
+      { id: 1, start: { r: 1, c: 2 }, end: { r: 2, c: 2 }, solution: [{ r: 1, c: 2 }, { r: 1, c: 1 }, { r: 1, c: 0 }, { r: 2, c: 0 }, { r: 2, c: 1 }, { r: 2, c: 2 }] },
     ],
   };
-  const result = analyzePuzzleAmbiguity(puzzle, 500);
+  assert.equal(validatePuzzle(ambiguous), true);
+  const result = analyzePuzzleAmbiguity(ambiguous, 12000);
+  assert.equal(result.status, 'ambiguous');
+  assert.equal(result.solutionsFound, 2);
+  assert.ok(result.nodes <= 12000);
+});
+
+test('ambiguity diagnostic respects its search budget', () => {
+  const puzzle = generatePuzzle(41, 20261020);
+  const result = analyzePuzzleAmbiguity(puzzle, 20);
   assert.ok(['unique', 'ambiguous', 'unknown', 'unsolvable'].includes(result.status));
-  assert.ok(result.nodes <= 500);
+  assert.ok(result.nodes <= 20);
 });
 
 test('offline analytics track starts, completions, feedback and return days', () => {
