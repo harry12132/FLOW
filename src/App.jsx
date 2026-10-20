@@ -23,7 +23,6 @@ function App() {
   const [showMenu, setShowMenu] = useState(false);
   const [toast, setToast] = useState('');
   const [daily, setDaily] = useState(false);
-  const [releasePulse, setReleasePulse] = useState(0);
   const boardRef = useRef(null);
   const pointerDown = useRef(false);
   const lastPointerCell = useRef(null);
@@ -42,7 +41,6 @@ function App() {
     const stop = () => {
       if (pointerDown.current && activeId !== null) {
         setPaths(prev => ({ ...prev, [activeId]: [] }));
-        setReleasePulse(p => p + 1);
       }
       pointerDown.current = false;
       lastPointerCell.current = null;
@@ -101,7 +99,6 @@ function App() {
     setActiveId(null);
     setWon(false);
     setHintCell(null);
-    setMoves(0);
     beep(300, 0.07);
   };
 
@@ -156,7 +153,6 @@ function App() {
       pointerDown.current = false;
       setActiveId(null);
       const canonicalPath = same(point, segment.start) ? [...next].reverse() : next;
-      setReleasePulse(p => p + 1);
       setPaths(prev => {
         const completed = { ...prev, [segmentId]: canonicalPath };
         const done = puzzleComplete(puzzle, completed);
@@ -259,7 +255,7 @@ function App() {
         <h1 className="mb-2 text-center text-4xl font-medium tracking-[-0.075em] sm:text-5xl">{won?'Perfectly connected.':'Find your flow.'}</h1>
         <p className="mb-7 text-center text-sm text-white/45 sm:mb-9">{won?'Every colour. Every cell.':'Connect each pair. Every square should belong to a path.'}</p>
         <div className="board-glass relative w-full max-w-[590px] rounded-[30px] p-3 sm:p-4" ref={boardRef}>
-          <div className={`board-inner relative aspect-square w-full overflow-hidden rounded-[20px] ${won?'board-won':''} ${releasePulse % 2 ? 'glass-releasing-a' : releasePulse ? 'glass-releasing-b' : ''}`} style={{'--size':puzzle.size}} onPointerMove={event=>{if(pointerDown.current&&activeId!==null){const point=cellFromTarget(document.elementFromPoint(event.clientX,event.clientY));if(point)onCellEnter(point)}}}>
+          <div className={`board-inner relative aspect-square w-full overflow-hidden rounded-[20px] ${won?'board-won':''}`} style={{'--size':puzzle.size}} onPointerMove={event=>{if(pointerDown.current&&activeId!==null){const point=cellFromTarget(document.elementFromPoint(event.clientX,event.clientY));if(point)onCellEnter(point)}}}>
             <GlassCanvas size={puzzle.size} activePath={activeGlassPath} />
             <div className="board-glow"/>
             <svg className="path-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">{pathPoints.map(({segment,path})=><g key={segment.id} className={activeId===segment.id?'active-path':''}><path className="path-halo" d={pathD(path)} stroke={segment.color}/><path className="path-line" d={pathD(path)} stroke={segment.color}/></g>)}</svg>
@@ -268,7 +264,6 @@ function App() {
               const color=endpoint?.color||(owner?puzzle.segments.find(s=>s.id===Number(owner[0]))?.color:null),isHint=same(point,hintCell),isPathEnd=owner&&paths[Number(owner[0])]?.at(-1)&&same(paths[Number(owner[0])].at(-1),point);
               return <div key={cellId(point)} data-cell={cellId(point)} className={`cell ${endpoint?'endpoint-cell':''} ${owner?'has-path':''} ${isHint?'hint-cell':''} ${isPathEnd?'path-end':''}`} onPointerDown={ev=>onCellPointerDown(ev,point)} style={{'--path-color':color||'transparent',borderRight:point.c===puzzle.size-1?0:undefined,borderBottom:point.r===puzzle.size-1?0:undefined}}>{endpoint&&<span className="endpoint-dot" style={{'--dot-color':endpoint.color}}><span/></span>}{isHint&&<span className="hint-pulse"/>}</div>
             })}</div>
-            <LiquidGlass displacementScale={58} blurAmount={0.025} saturation={155} aberrationIntensity={1.35} elasticity={0.32} cornerRadius={20} padding="0px" mode="prominent" mouseContainer={boardRef} className="board-lens" style={{position:'absolute',inset:0,zIndex:4,pointerEvents:'none'}}><span className="board-lens-fill" /></LiquidGlass>
           </div>
           {won&&<div className="win-overlay"><div className="win-orb">✦</div><h2 className="mt-4 text-2xl font-medium tracking-tight sm:text-3xl">Beautiful.</h2><p className="mt-2 text-sm text-white/55">You found every connection.</p><button className="next-button mt-6" onClick={()=>installLevel(level+1)}>Next puzzle <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div>}
         </div>
