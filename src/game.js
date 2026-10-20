@@ -247,19 +247,6 @@ export function analyzePuzzleAmbiguity(puzzle, maxNodes = 12000) {
 }
 
 
-// FLOW's adaptive difficulty model. It estimates challenge fit from observed play,
-// not from a judgement about the player's intelligence.
-export function getAdaptiveLevel(level, rating = 50) {
-  const offset = rating >= 80 ? 5
-    : rating >= 70 ? 3
-    : rating >= 60 ? 1
-    : rating < 25 ? -5
-    : rating < 35 ? -3
-    : rating < 45 ? -1
-    : 0;
-  return Math.max(1, level + offset);
-}
-
 export function scorePuzzlePerformance({ puzzle, elapsedSeconds, hints = 0, resets = 0, backtracks = 0 }) {
   const structuralDifficulty = puzzle.difficulty?.score ?? estimatePuzzleDifficulty(puzzle).score;
   const baselineSeconds = 18 + puzzle.size * puzzle.size * 0.65 + puzzle.segments.length * 4.5;
