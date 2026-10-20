@@ -319,11 +319,12 @@ export function generateAdaptivePuzzle(level, profile = {}, seed = null, mode = 
   const feedbackBias = Math.max(-12, Math.min(12, Number(profile.feedbackBias ?? 0)));
   const defaultSize = Math.min(8, 5 + Math.floor(Math.max(0, level - 1) / 18));
   const defaultPairs = Math.min(8, Math.max(3, 3 + Math.floor(level / 7)));
-  const sizeShift = mode === 'relaxed' ? -1 : mode === 'challenging' ? 1 : rating >= 88 ? 1 : rating <= 18 ? -1 : 0;
+  const sizeShift = mode === 'relaxed' ? -1 : mode === 'challenging' ? 1 : mode === 'standard' ? 0 : rating >= 88 ? 1 : rating <= 18 ? -1 : 0;
   const size = Math.max(5, Math.min(8, defaultSize + sizeShift));
-  const pairShift = mode === 'relaxed' ? -1 : mode === 'challenging' ? 1 : rating >= 72 ? 1 : rating <= 28 ? -1 : 0;
+  const pairShift = mode === 'relaxed' ? -1 : mode === 'challenging' ? 1 : mode === 'standard' ? 0 : rating >= 72 ? 1 : rating <= 28 ? -1 : 0;
   const pairCount = Math.max(3, Math.min(8, defaultPairs + pairShift, Math.floor((size * size) / 3)));
-  const modeBias = (mode === 'relaxed' ? -9 : mode === 'challenging' ? 9 : 0) + ({ gentle: -7, balanced: 0, spicy: 7 }[variant] ?? 0);
+  const variantBias = mode === 'adaptive' ? ({ gentle: -7, balanced: 0, spicy: 7 }[variant] ?? 0) : 0;
+  const modeBias = (mode === 'relaxed' ? -9 : mode === 'challenging' ? 9 : 0) + variantBias;
   const randomSeed = seed ?? Math.floor(Math.random() * 0xffffffff);
   const variants = mode === 'relaxed' ? 3 : mode === 'challenging' ? 5 : 4;
   const candidates = [];
@@ -338,7 +339,8 @@ export function generateAdaptivePuzzle(level, profile = {}, seed = null, mode = 
   }
   const sortedScores = candidates.map(candidate => candidate.difficulty.score).sort((a, b) => a - b);
   const baseline = sortedScores[Math.floor(sortedScores.length / 2)];
-  const target = Math.max(8, Math.min(96, baseline + (rating - 50) * 0.38 + feedbackBias + modeBias));
+  const personalAdjustment = mode === 'adaptive' ? (rating - 50) * 0.38 + feedbackBias : 0;
+  const target = Math.max(8, Math.min(96, baseline + personalAdjustment + modeBias));
   let best = candidates[0];
   let bestDistance = Infinity;
   for (const candidate of candidates) {
