@@ -15,7 +15,7 @@ function App() {
   const [level, setLevel] = useState(Math.max(1, initial.level || 1));
   const [best, setBest] = useState(initial.best || 1);
   const [sound, setSound] = useState(initial.sound !== false);
-  const [adaptive, setAdaptive] = useState(() => ({ rating: Math.max(0, Math.min(100, initial.adaptive?.rating ?? 50)), samples: initial.adaptive?.samples ?? 0, feedbackBias: initial.adaptive?.feedbackBias ?? 0, arms: initial.adaptive?.arms ?? {}, uncertainty: initial.adaptive?.uncertainty ?? 35 }));
+  const [adaptive, setAdaptive] = useState(() => ({ rating: Math.max(0, Math.min(100, initial.adaptive?.rating ?? 50)), samples: initial.adaptive?.samples ?? 0, feedbackBias: initial.adaptive?.feedbackBias ?? 0, arms: initial.adaptive?.arms ?? {}, uncertainty: initial.adaptive?.uncertainty ?? ratingUncertainty(initial.adaptive?.samples ?? 0) }));
   const [difficultyMode, setDifficultyMode] = useState(initial.difficultyMode || 'adaptive');
   const [puzzle, setPuzzle] = useState(() => generateAdaptivePuzzle(Math.max(1, initial.level || 1), initial.adaptive || {}, null, initial.difficultyMode || 'adaptive', choosePuzzleVariant(initial.adaptive || {})));
   const [paths, setPaths] = useState({});
