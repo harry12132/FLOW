@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import LiquidGlass from 'liquid-glass-react';
 import GlassCanvas from './GlassCanvas.jsx';
-import { cellId, createEmptyPaths, generatePuzzle, getOccupied, isAdjacent, puzzleComplete, getAdaptiveLevel, scorePuzzlePerformance, updateAdaptiveRating } from './game.js';
+import { cellId, createEmptyPaths, generatePuzzle, generateAdaptivePuzzle, getOccupied, isAdjacent, puzzleComplete, scorePuzzlePerformance, updateAdaptiveRating, validatePuzzle } from './game.js';
+import { appendAnalyticsEvent, analyticsSummary, choosePuzzleVariant, readAnalytics, ratingUncertainty, recordVariantReward } from './analytics.js';
 
 const STORE = 'flow-save-v1';
 const readSave = () => {
@@ -14,8 +15,9 @@ function App() {
   const [level, setLevel] = useState(Math.max(1, initial.level || 1));
   const [best, setBest] = useState(initial.best || 1);
   const [sound, setSound] = useState(initial.sound !== false);
-  const [adaptive, setAdaptive] = useState(() => ({ rating: Math.max(0, Math.min(100, initial.adaptive?.rating ?? 50)), samples: initial.adaptive?.samples ?? 0 }));
-  const [puzzle, setPuzzle] = useState(() => generatePuzzle(getAdaptiveLevel(Math.max(1, initial.level || 1), initial.adaptive?.rating ?? 50)));
+  const [adaptive, setAdaptive] = useState(() => ({ rating: Math.max(0, Math.min(100, initial.adaptive?.rating ?? 50)), samples: initial.adaptive?.samples ?? 0, feedbackBias: initial.adaptive?.feedbackBias ?? 0, arms: initial.adaptive?.arms ?? {}, uncertainty: initial.adaptive?.uncertainty ?? 35 }));
+  const [difficultyMode, setDifficultyMode] = useState(initial.difficultyMode || 'adaptive');
+  const [puzzle, setPuzzle] = useState(() => generateAdaptivePuzzle(Math.max(1, initial.level || 1), initial.adaptive || {}, null, initial.difficultyMode || 'adaptive', choosePuzzleVariant(initial.adaptive || {})));
   const [paths, setPaths] = useState({});
   const [activeId, setActiveId] = useState(null);
   const [won, setWon] = useState(false);
@@ -24,6 +26,10 @@ function App() {
   const [showMenu, setShowMenu] = useState(false);
   const [toast, setToast] = useState('');
   const [daily, setDaily] = useState(false);
+  const [showStats, setShowStats] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+  const [analytics, setAnalytics] = useState(() => readAnalytics());
+  const sessionRecorded = useRef(false);
   const boardRef = useRef(null);
   const pointerDown = useRef(false);
   const lastPointerCell = useRef(null);
@@ -37,9 +43,23 @@ function App() {
   const total = puzzle.size * puzzle.size;
   const progress = Math.round((filled / total) * 100);
 
+  const recordEvent = (type, detail = {}) => setAnalytics(previous => appendAnalyticsEvent(previous, type, detail));
+  const stats = analyticsSummary(analytics);
+
   useEffect(() => {
-    localStorage.setItem(STORE, JSON.stringify({ level, best, sound, adaptive }));
-  }, [level, best, sound, adaptive]);
+    localStorage.setItem(STORE, JSON.stringify({ level, best, sound, adaptive, difficultyMode }));
+  }, [level, best, sound, adaptive, difficultyMode]);
+
+  useEffect(() => {
+    try { localStorage.setItem('flow-analytics-v1', JSON.stringify(analytics)); } catch { /* Analytics are optional; the game still works without storage. */ }
+  }, [analytics]);
+
+  useEffect(() => {
+    if (sessionRecorded.current) return;
+    sessionRecorded.current = true;
+    recordEvent('session_start');
+    recordEvent('puzzle_start', { level, mode: difficultyMode, variant: puzzle.difficulty?.variant });
+  }, []);
 
   useEffect(() => {
     const stop = () => {
@@ -86,9 +106,11 @@ function App() {
   };
 
   const installLevel = (nextLevel, isDaily = false) => {
-    const daySeed = Number(new Date().toISOString().slice(0, 10).replaceAll('-', ''));
-    const effectiveLevel = isDaily ? nextLevel : getAdaptiveLevel(nextLevel, adaptive.rating);
-    const next = generatePuzzle(effectiveLevel, isDaily ? daySeed : null);
+    if (!won && !puzzleResultRecorded.current && sessionRecorded.current) recordEvent('puzzle_abandon', { level, mode: difficultyMode });
+    const localDate = new Date();
+    const daySeed = Number(`${localDate.getFullYear()}${String(localDate.getMonth() + 1).padStart(2, '0')}${String(localDate.getDate()).padStart(2, '0')}`);
+    const variant = choosePuzzleVariant(adaptive);
+    const next = isDaily ? generatePuzzle(nextLevel, daySeed) : generateAdaptivePuzzle(nextLevel, adaptive, null, difficultyMode, variant);
     puzzleStartedAt.current = Date.now();
     puzzleMetrics.current = { hints: 0, resets: 0, backtracks: 0 };
     puzzleResultRecorded.current = false;
@@ -98,7 +120,9 @@ function App() {
     setActiveId(null);
     setWon(false);
     setHintCell(null);
+    setFeedback(null);
     setDaily(isDaily);
+    recordEvent('puzzle_start', { level: nextLevel, mode: isDaily ? 'daily' : difficultyMode, variant: next.difficulty?.variant, difficulty: next.difficulty?.score });
     setShowMenu(false);
   };
 
@@ -169,11 +193,18 @@ function App() {
         if (done) {
           setWon(true);
           setBest(b => Math.max(b, level + 1));
-          if (!daily && !puzzleResultRecorded.current) {
+          if (!puzzleResultRecorded.current) {
             puzzleResultRecorded.current = true;
             const elapsedSeconds = (Date.now() - puzzleStartedAt.current) / 1000;
-            const score = scorePuzzlePerformance({ puzzle, elapsedSeconds, ...puzzleMetrics.current });
-            setAdaptive(previous => ({ rating: updateAdaptiveRating(previous.rating, score), samples: previous.samples + 1 }));
+            recordEvent('puzzle_complete', { level, elapsedSeconds: Math.round(elapsedSeconds), hints: puzzleMetrics.current.hints, resets: puzzleMetrics.current.resets, backtracks: puzzleMetrics.current.backtracks, difficulty: puzzle.difficulty?.score, variant: puzzle.difficulty?.variant, daily });
+            if (!daily) {
+              const score = scorePuzzlePerformance({ puzzle, elapsedSeconds, ...puzzleMetrics.current });
+              setAdaptive(previous => {
+                const samples = previous.samples + 1;
+                return { ...previous, rating: updateAdaptiveRating(previous.rating, score, previous.samples), samples, uncertainty: ratingUncertainty(samples) };
+              });
+              setAdaptive(previous => recordVariantReward(previous, puzzle.difficulty?.variant || 'balanced', 0.6));
+            }
           }
           beep(760, 0.18);
         }
