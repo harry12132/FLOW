@@ -27,11 +27,8 @@ vec3 scene(vec2 uv) {
   float b=exp(-length((uv-vec2(0.86,0.28))*vec2(1.2,1.0))*3.4);
   float c=exp(-length((uv-vec2(0.52,0.48))*vec2(0.8,1.3))*4.5);
   col+=vec3(0.02,0.24,0.30)*a*0.8+vec3(0.20,0.09,0.34)*b*0.7+vec3(0.02,0.12,0.20)*c*0.75;
-  float bands=sin(uv.x*18.0+sin(uv.y*9.0+uTime*0.13)*1.4)*0.5+0.5;
-  col+=vec3(0.035,0.08,0.12)*smoothstep(0.82,1.0,bands)*0.35;
-  vec2 g=abs(fract(uv*18.0)-0.5);
-  float grid=1.0-smoothstep(0.485,0.5,max(g.x,g.y));
-  col+=vec3(0.18,0.36,0.43)*grid*0.13;
+  float bands=sin(uv.x*9.0+sin(uv.y*5.0+uTime*0.10)*0.8)*0.5+0.5;
+  col+=vec3(0.025,0.055,0.08)*smoothstep(0.88,1.0,bands)*0.22;
   col+=(noise(uv*uResolution*0.35+uTime*0.03)-0.5)*0.035;
   col+=vec3(0.42,0.82,0.92)*pow(max(0.0,1.0-length(uv-vec2(0.18,0.92))),7.0)*0.2;
   return col;
@@ -41,19 +38,19 @@ void main() {
   for(int i=0;i<64;i++) {
     if(i>=uPointCount) break;
     vec2 p=uPoints[i]; float d=length(uv-p);
-    field+=sin(d*72.0-uTime*4.2)*exp(-d*15.0)*0.0028;
+    field+=sin(d*54.0-uTime*3.4)*exp(-d*12.0)*0.0018;
     if(i>0) {
       float ld=segDist(uv,uPoints[i-1],p); nearestLine=min(nearestLine,ld);
-      field+=sin(ld*180.0-uTime*3.2)*exp(-ld*27.0)*0.0035;
-      uv+=normalize(uv-(uPoints[i-1]+p)*0.5+vec2(0.0001))*exp(-ld*70.0)*0.0012;
+      field+=sin(ld*135.0-uTime*2.6)*exp(-ld*22.0)*0.0018;
+      uv+=normalize(uv-(uPoints[i-1]+p)*0.5+vec2(0.0001))*exp(-ld*54.0)*0.0007;
     }
   }
   uv=clamp(uv+vec2(field,field*0.7),vec2(0.001),vec2(0.999));
   vec3 col=scene(uv);
   float edge=1.0-smoothstep(0.0,0.035,min(min(vUv.x,1.0-vUv.x),min(vUv.y,1.0-vUv.y)));
   float sheen=exp(-vUv.y*22.0)*(0.18+0.12*sin(vUv.x*8.0));
-  col+=vec3(0.24,0.68,0.78)*exp(-nearestLine*95.0)*0.09;
-  col+=vec3(0.45,0.82,0.95)*edge*0.18+vec3(0.65,0.88,1.0)*sheen*0.16;
+  col+=vec3(0.16,0.46,0.56)*exp(-nearestLine*85.0)*0.045;
+  col+=vec3(0.38,0.68,0.78)*edge*0.11+vec3(0.65,0.88,1.0)*sheen*0.10;
   gl_FragColor=vec4(col,1.0);
 }
 `;
