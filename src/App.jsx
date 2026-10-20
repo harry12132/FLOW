@@ -260,6 +260,18 @@ function App() {
     beep(680, 0.1);
   };
 
+  const giveFeedback = (rating) => {
+    if (feedback) return;
+    setFeedback(rating);
+    recordEvent('feedback', { rating, level, variant: puzzle.difficulty?.variant, difficulty: puzzle.difficulty?.score });
+    const reward = rating === 'balanced' ? 1 : rating === 'easy' ? 0.55 : 0.15;
+    setAdaptive(previous => ({
+      ...recordVariantReward(previous, puzzle.difficulty?.variant || 'balanced', reward),
+      feedbackBias: Math.max(-12, Math.min(12, (previous.feedbackBias || 0) + (rating === 'easy' ? 3 : rating === 'hard' ? -4 : 0))),
+    }));
+    notify(rating === 'balanced' ? 'Got it. More like this.' : rating === 'easy' ? 'Got it. I’ll raise the challenge.' : 'Got it. I’ll ease the challenge.');
+  };
+
   const pathFor = (segment) => paths[segment.id] || [];
   const isEndpoint = (point) => puzzle.segments.find(s => same(point, s.start) || same(point, s.end));
   const solvedCount = puzzle.segments.filter(s => {
@@ -314,14 +326,15 @@ function App() {
               return <div key={cellId(point)} data-cell={cellId(point)} className={`cell ${endpoint?'endpoint-cell':''} ${owner?'has-path':''} ${isHint?'hint-cell':''} ${isPathEnd?'path-end':''}`} onPointerDown={ev=>onCellPointerDown(ev,point)} style={{'--path-color':color||'transparent',borderRight:point.c===puzzle.size-1?0:undefined,borderBottom:point.r===puzzle.size-1?0:undefined}}>{endpoint&&<span className="endpoint-dot" style={{'--dot-color':endpoint.color}}><span/></span>}{isHint&&<span className="hint-pulse"/>}</div>
             })}</div>
           </div>
-          {won&&<div className="win-overlay"><div className="win-orb">✦</div><h2 className="mt-4 text-2xl font-medium tracking-tight sm:text-3xl">Beautiful.</h2><p className="mt-2 text-sm text-white/55">You found every connection.</p><button className="next-button mt-6" onClick={()=>installLevel(level+1)}>Next puzzle <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div>}
+          {won&&<div className="win-overlay"><div className="win-orb">✦</div><h2 className="mt-4 text-2xl font-medium tracking-tight sm:text-3xl">Beautiful.</h2><p className="mt-2 text-sm text-white/55">You found every connection.</p><div className="feedback-row"><span>How did that feel?</span><div><button className={feedback==='easy'?'selected':''} onClick={()=>giveFeedback('easy')}>Too easy</button><button className={feedback==='balanced'?'selected':''} onClick={()=>giveFeedback('balanced')}>Just right</button><button className={feedback==='hard'?'selected':''} onClick={()=>giveFeedback('hard')}>Too hard</button></div></div><button className="next-button mt-5" onClick={()=>installLevel(level+1)}>Next puzzle <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div>}
         </div>
         <div className="mt-5 flex w-full max-w-[590px] items-center justify-between gap-4 px-1"><div className="flex min-w-0 flex-1 items-center gap-3"><div className="progress-track flex-1"><span style={{width:`${progress}%`}}/></div><span className="w-10 text-right text-xs tabular-nums text-white/50">{progress}%</span></div><button className="hint-button" onClick={useHint} disabled={won}><svg viewBox="0 0 24 24"><path d="M9 18h6m-5 3h4m-2-19a7 7 0 0 0-4 12.7c.6.4 1 1.1 1 1.8h6c0-.7.4-1.4 1-1.8A7 7 0 0 0 12 2Z"/></svg><span>Hint</span><span className="hint-number">{hints}</span></button></div>
         <div className="mt-4 flex items-center gap-2 text-[11px] tracking-wide text-white/30"><span className="status-dot"/>{solvedCount} of {puzzle.segments.length} paths connected</div>
         <p className="mt-2 text-[10px] tracking-wide text-white/25">Difficulty adapts to your pace.</p>
       </section>
       <footer className="relative z-10 mx-auto flex w-full max-w-5xl items-center justify-between px-5 pb-5 text-[10px] tracking-wide text-white/25 sm:px-8"><span>FLOW</span><span>{Math.max(0,best-1)} completed</span></footer>
-      {showMenu&&<div className="menu-backdrop" onClick={()=>setShowMenu(false)}><div className="menu-glass" onClick={ev=>ev.stopPropagation()}><button onClick={()=>installLevel(1)}>Restart from level one</button><button onClick={()=>installLevel(level,true)}>Daily puzzle</button><button onClick={()=>{setSound(v=>!v);setShowMenu(false)}}>{sound?'Sound off':'Sound on'}</button><p>Progress saves automatically.</p></div></div>}
+      {showMenu&&<div className="menu-backdrop" onClick={()=>setShowMenu(false)}><div className="menu-glass" onClick={ev=>ev.stopPropagation()}><button onClick={()=>installLevel(1)}>Restart from level one</button><button onClick={()=>installLevel(level,true)}>Daily puzzle</button><button onClick={()=>{setShowStats(true);setShowMenu(false)}}>Player stats</button><button onClick={()=>{const modes=['adaptive','relaxed','standard','challenging'];const next=modes[(modes.indexOf(difficultyMode)+1)%modes.length];setDifficultyMode(next);setShowMenu(false);notify('Difficulty: '+next)}}>Difficulty: {difficultyMode}</button><button onClick={()=>{setSound(v=>!v);setShowMenu(false)}}>{sound?'Sound off':'Sound on'}</button><p>All stats stay on this device. FLOW works offline after its first load.</p></div></div>}
+      {showStats&&<div className="stats-backdrop" onClick={()=>setShowStats(false)}><section className="stats-panel" role="dialog" aria-modal="true" aria-label="Player stats" onClick={ev=>ev.stopPropagation()}><div className="stats-heading"><div><span className="stats-eyebrow">YOUR FLOW</span><h2>Player stats</h2></div><button onClick={()=>setShowStats(false)} aria-label="Close stats">×</button></div><div className="stats-rating"><span>Adaptive rating</span><strong>{adaptive.rating}<small>/100</small></strong><p>Estimated challenge fit · uncertainty ±{adaptive.uncertainty ?? ratingUncertainty(adaptive.samples)}</p></div><div className="stats-grid"><div><strong>{stats.completions}</strong><span>Puzzles solved</span></div><div><strong>{stats.averageSolveSeconds ? Math.floor(stats.averageSolveSeconds/60)+'m '+stats.averageSolveSeconds%60+'s' : '—'}</strong><span>Average solve</span></div><div><strong>{stats.returnDays}</strong><span>Days played</span></div><div><strong>{stats.abandonments}</strong><span>Unfinished</span></div><div><strong>{stats.hintsPerPuzzle}</strong><span>Hints per solve</span></div><div><strong>{stats.resetsPerPuzzle}</strong><span>Resets per solve</span></div></div><div className="stats-section"><h3>Difficulty feedback</h3><p>Too easy: {stats.feedback.easy} · Just right: {stats.feedback.balanced} · Too hard: {stats.feedback.hard}</p><p className="stats-note">Your analytics are stored locally in this browser. No account or network connection is needed.</p></div><button className="stats-close" onClick={()=>setShowStats(false)}>Back to puzzle</button></section></div>}
       {toast&&<div className="toast" role="status">{toast}</div>}
     </main>
   );
