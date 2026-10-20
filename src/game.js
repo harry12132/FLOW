@@ -325,7 +325,7 @@ export function generateAdaptivePuzzle(level, profile = {}, seed = null, mode = 
   const pairCount = Math.max(3, Math.min(8, defaultPairs + pairShift, Math.floor((size * size) / 3)));
   const modeBias = (mode === 'relaxed' ? -9 : mode === 'challenging' ? 9 : 0) + ({ gentle: -7, balanced: 0, spicy: 7 }[variant] ?? 0);
   const randomSeed = seed ?? Math.floor(Math.random() * 0xffffffff);
-  const variants = mode === 'relaxed' ? 5 : 7;
+  const variants = mode === 'relaxed' ? 3 : mode === 'challenging' ? 5 : 4;
   const candidates = [];
   for (let i = 0; i < variants; i++) {
     const candidateSeed = (randomSeed + Math.imul(i + 1, 0x45d9f3b)) >>> 0;
