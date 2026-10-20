@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 :root{font-family:'DM Sans',ui-sans-serif,system-ui,sans-serif;color:#f5f8ff;background:#080d19;font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased}*{box-sizing:border-box}html{min-width:320px;background:#080d19}body{margin:0;min-width:320px;min-height:100vh}button{font:inherit;cursor:pointer}button:focus-visible{outline:2px solid #a5f3fc;outline-offset:4px}button:disabled{opacity:.4;cursor:default}main{isolation:isolate;background:radial-gradient(ellipse at 50% -25%,#1c3550,#0c1424 42%,#080d19 78%);min-height:100svh}
 .ambient{position:absolute;z-index:-1;pointer-events:none;border-radius:999px;filter:blur(80px);opacity:.42;animation:drift 18s ease-in-out infinite alternate}.ambient-one{width:34rem;height:34rem;left:-14rem;top:16rem;background:#146c79}.ambient-two{width:32rem;height:32rem;right:-13rem;top:8rem;background:#49348c;animation-delay:-6s}.ambient-three{width:24rem;height:24rem;left:42%;bottom:-15rem;background:#165a6c;animation-delay:-11s}@keyframes drift{to{transform:translate3d(3%,4%,0) scale(1.08)}}
@@ -39,3 +38,24 @@
 @media(max-width:520px){
   .board-glass{backdrop-filter:blur(6px) saturate(115%);-webkit-backdrop-filter:blur(6px) saturate(115%)}
 }
+
+
+/* Player stats and feedback use the same restrained glass language as the board. */
+.feedback-row{margin-top:18px;display:flex;flex-direction:column;align-items:center;gap:9px;width:min(320px,90%);color:#ffffff8a;font-size:11px}
+.feedback-row>div{display:flex;gap:5px;width:100%}
+.feedback-row button{flex:1;border:1px solid #ffffff1a;border-radius:10px;background:#ffffff08;color:#dce9f5;padding:9px 5px;font-size:10px;transition:background .16s,border-color .16s}
+.feedback-row button:hover,.feedback-row button.selected{background:#a7f3e515;border-color:#a7f3e54d;color:#cafff1}
+.stats-backdrop{position:fixed;z-index:35;inset:0;display:grid;place-items:center;padding:18px;background:#0207129c;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);animation:fade .18s ease both}
+.stats-panel{width:min(430px,100%);max-height:min(88svh,760px);overflow:auto;padding:24px;border:1px solid #ffffff20;border-radius:26px;background:linear-gradient(145deg,#142338f5,#0b1424f7);box-shadow:0 30px 100px #0009,inset 0 1px #ffffff15}
+.stats-heading{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px}
+.stats-heading h2{font-size:25px;letter-spacing:-.06em;font-weight:500;margin:4px 0 0}
+.stats-eyebrow{font-size:9px;letter-spacing:.18em;color:#8bded8}
+.stats-heading>button{display:grid;place-items:center;width:32px;height:32px;border:1px solid #ffffff18;border-radius:11px;background:#ffffff08;color:#d9e8f5;font-size:22px}
+.stats-rating{padding:17px;border:1px solid #9cecf21b;border-radius:18px;background:linear-gradient(135deg,#9cecf20c,#a7f3e505);display:grid;grid-template-columns:1fr auto;align-items:center;gap:3px 12px}
+.stats-rating>span{font-size:11px;color:#ffffff9c}.stats-rating>strong{font-size:30px;letter-spacing:-.06em;color:#baf7ed}.stats-rating small{font-size:12px;color:#ffffff65;margin-left:3px;font-weight:400}.stats-rating p{grid-column:1/-1;font-size:10px;color:#ffffff58;margin:4px 0 0}
+.stats-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin:12px 0}
+.stats-grid>div{padding:14px;border:1px solid #ffffff12;border-radius:15px;background:#ffffff05;display:flex;flex-direction:column;gap:4px;min-width:0}
+.stats-grid strong{font-size:22px;font-weight:500;letter-spacing:-.04em;color:#f2f7ff}.stats-grid span{font-size:10px;color:#ffffff66}
+.stats-section{padding:13px 2px 4px;border-top:1px solid #ffffff12}.stats-section h3{font-size:12px;font-weight:500;margin:0 0 7px;color:#e6f3fb}.stats-section p{font-size:11px;line-height:1.6;color:#ffffff76;margin:4px 0}.stats-section .stats-note{font-size:10px;color:#ffffff42;margin-top:12px}
+.stats-close{width:100%;margin-top:13px;border:1px solid #b9ffef55;border-radius:13px;padding:12px;color:#092020;background:linear-gradient(110deg,#a7f3e5,#d2fff2);font-size:12px;font-weight:600}
+@media(max-width:520px){.stats-panel{padding:19px;border-radius:22px}.feedback-row{width:95%}.feedback-row button{font-size:9px}}
