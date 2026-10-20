@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import LiquidGlass from 'liquid-glass-react';
 import GlassCanvas from './GlassCanvas.jsx';
-import { cellId, createEmptyPaths, generatePuzzle, getOccupied, isAdjacent, puzzleComplete } from './game.js';
+import { cellId, createEmptyPaths, generatePuzzle, getOccupied, isAdjacent, puzzleComplete, getAdaptiveLevel, scorePuzzlePerformance, updateAdaptiveRating } from './game.js';
 
 const STORE = 'flow-save-v1';
 const readSave = () => {
@@ -14,7 +14,8 @@ function App() {
   const [level, setLevel] = useState(Math.max(1, initial.level || 1));
   const [best, setBest] = useState(initial.best || 1);
   const [sound, setSound] = useState(initial.sound !== false);
-  const [puzzle, setPuzzle] = useState(() => generatePuzzle(Math.max(1, initial.level || 1)));
+  const [adaptive, setAdaptive] = useState(() => ({ rating: Math.max(0, Math.min(100, initial.adaptive?.rating ?? 50)), samples: initial.adaptive?.samples ?? 0 }));
+  const [puzzle, setPuzzle] = useState(() => generatePuzzle(getAdaptiveLevel(Math.max(1, initial.level || 1), initial.adaptive?.rating ?? 50)));
   const [paths, setPaths] = useState({});
   const [activeId, setActiveId] = useState(null);
   const [won, setWon] = useState(false);
@@ -27,6 +28,9 @@ function App() {
   const pointerDown = useRef(false);
   const lastPointerCell = useRef(null);
   const audioRef = useRef(null);
+  const puzzleStartedAt = useRef(Date.now());
+  const puzzleMetrics = useRef({ hints: 0, resets: 0, backtracks: 0 });
+  const puzzleResultRecorded = useRef(false);
 
   const occupied = useMemo(() => getOccupied(paths, activeId), [paths, activeId]);
   const filled = useMemo(() => Object.values(paths).reduce((n, p) => n + p.length, 0), [paths]);
@@ -34,8 +38,8 @@ function App() {
   const progress = Math.round((filled / total) * 100);
 
   useEffect(() => {
-    localStorage.setItem(STORE, JSON.stringify({ level, best, sound }));
-  }, [level, best, sound]);
+    localStorage.setItem(STORE, JSON.stringify({ level, best, sound, adaptive }));
+  }, [level, best, sound, adaptive]);
 
   useEffect(() => {
     const stop = () => {
@@ -83,7 +87,11 @@ function App() {
 
   const installLevel = (nextLevel, isDaily = false) => {
     const daySeed = Number(new Date().toISOString().slice(0, 10).replaceAll('-', ''));
-    const next = generatePuzzle(nextLevel, isDaily ? daySeed : null);
+    const effectiveLevel = isDaily ? nextLevel : getAdaptiveLevel(nextLevel, adaptive.rating);
+    const next = generatePuzzle(effectiveLevel, isDaily ? daySeed : null);
+    puzzleStartedAt.current = Date.now();
+    puzzleMetrics.current = { hints: 0, resets: 0, backtracks: 0 };
+    puzzleResultRecorded.current = false;
     setLevel(nextLevel);
     setPuzzle(next);
     setPaths(createEmptyPaths(next));
@@ -95,6 +103,7 @@ function App() {
   };
 
   const reset = () => {
+    puzzleMetrics.current.resets += 1;
     setPaths(createEmptyPaths(puzzle));
     setActiveId(null);
     setWon(false);
@@ -134,6 +143,7 @@ function App() {
     const last = current.at(-1);
     if (same(point, last)) {
       if (current.length > 1 && same(point, current[current.length - 2])) {
+        puzzleMetrics.current.backtracks += 1;
         setPaths(prev => ({ ...prev, [segmentId]: current.slice(0, -1) }));
         beep(310, 0.025);
       }
@@ -159,6 +169,12 @@ function App() {
         if (done) {
           setWon(true);
           setBest(b => Math.max(b, level + 1));
+          if (!daily && !puzzleResultRecorded.current) {
+            puzzleResultRecorded.current = true;
+            const elapsedSeconds = (Date.now() - puzzleStartedAt.current) / 1000;
+            const score = scorePuzzlePerformance({ puzzle, elapsedSeconds, ...puzzleMetrics.current });
+            setAdaptive(previous => ({ rating: updateAdaptiveRating(previous.rating, score), samples: previous.samples + 1 }));
+          }
           beep(760, 0.18);
         }
         return completed;
@@ -179,6 +195,7 @@ function App() {
       const id = Number(owner[0]);
       const path = owner[1];
       if (path.length && !same(point, path[0]) && !same(point, path.at(-1))) {
+        puzzleMetrics.current.backtracks += Math.max(1, path.length - path.findIndex(p => same(p, point)) - 1);
         setPaths(prev => ({ ...prev, [id]: path.slice(0, path.findIndex(p => same(p, point)) + 1) }));
         setActiveId(id);
         pointerDown.current = true;
@@ -205,6 +222,7 @@ function App() {
     if (!segment) return;
     const current = paths[segment.id] || [];
     const nextPoint = segment.solution.find((p, i) => i >= current.length && !current.some(q => same(p, q)));
+    puzzleMetrics.current.hints += 1;
     setHintCell(nextPoint || segment.solution[Math.min(current.length, segment.solution.length - 1)]);
     setHints(h => h - 1);
     notify('A little nudge');
@@ -269,6 +287,7 @@ function App() {
         </div>
         <div className="mt-5 flex w-full max-w-[590px] items-center justify-between gap-4 px-1"><div className="flex min-w-0 flex-1 items-center gap-3"><div className="progress-track flex-1"><span style={{width:`${progress}%`}}/></div><span className="w-10 text-right text-xs tabular-nums text-white/50">{progress}%</span></div><button className="hint-button" onClick={useHint} disabled={won}><svg viewBox="0 0 24 24"><path d="M9 18h6m-5 3h4m-2-19a7 7 0 0 0-4 12.7c.6.4 1 1.1 1 1.8h6c0-.7.4-1.4 1-1.8A7 7 0 0 0 12 2Z"/></svg><span>Hint</span><span className="hint-number">{hints}</span></button></div>
         <div className="mt-4 flex items-center gap-2 text-[11px] tracking-wide text-white/30"><span className="status-dot"/>{solvedCount} of {puzzle.segments.length} paths connected</div>
+        <p className="mt-2 text-[10px] tracking-wide text-white/25">Difficulty adapts to your pace.</p>
       </section>
       <footer className="relative z-10 mx-auto flex w-full max-w-5xl items-center justify-between px-5 pb-5 text-[10px] tracking-wide text-white/25 sm:px-8"><span>FLOW</span><span>{Math.max(0,best-1)} completed</span></footer>
       {showMenu&&<div className="menu-backdrop" onClick={()=>setShowMenu(false)}><div className="menu-glass" onClick={ev=>ev.stopPropagation()}><button onClick={()=>installLevel(1)}>Restart from level one</button><button onClick={()=>installLevel(level,true)}>Daily puzzle</button><button onClick={()=>{setSound(v=>!v);setShowMenu(false)}}>{sound?'Sound off':'Sound on'}</button><p>Progress saves automatically.</p></div></div>}
