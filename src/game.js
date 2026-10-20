@@ -76,12 +76,13 @@ function makeHamiltonianPath(n, random) {
   return path;
 }
 
-export function generatePuzzle(level, seed = null) {
+export function generatePuzzle(level, seed = null, options = {}) {
   const random = seededRandom(seed ?? Math.floor(Math.random() * 0xffffffff));
-  const size = Math.min(8, 5 + Math.floor(Math.max(0, level - 1) / 18));
+  const defaultSize = Math.min(8, 5 + Math.floor(Math.max(0, level - 1) / 18));
+  const size = Math.max(5, Math.min(8, options.size ?? defaultSize));
   const cells = size * size;
-  const desiredPairs = Math.min(8, Math.max(3, 3 + Math.floor(level / 7)));
-  const pairCount = Math.min(desiredPairs, Math.floor(cells / 3));
+  const desiredPairs = options.pairCount ?? Math.min(8, Math.max(3, 3 + Math.floor(level / 7)));
+  const pairCount = Math.max(3, Math.min(8, desiredPairs, Math.floor(cells / 3)));
   const route = makeHamiltonianPath(size, random);
 
   // Cut one complete board-covering route into separate, non-overlapping paths.
@@ -124,7 +125,9 @@ export function generatePuzzle(level, seed = null) {
     s.name = color.name;
   });
 
-  return { size, segments, level, seed: seed ?? null };
+  const puzzle = { size, segments, level, seed: seed ?? null };
+  puzzle.difficulty = estimatePuzzleDifficulty(puzzle);
+  return puzzle;
 }
 
 export function isAdjacent(a, b) {
@@ -197,4 +200,100 @@ export function scorePuzzlePerformance({ puzzle, elapsedSeconds, hints = 0, rese
 export function updateAdaptiveRating(previousRating = 50, performanceScore = 50) {
   // Smooth updates prevent one unusually easy or difficult puzzle changing the game abruptly.
   return Math.round(previousRating * 0.7 + performanceScore * 0.3);
+}
+
+
+// Estimate puzzle challenge from puzzle structure alone, never from a judgement about a player.
+// This is a calibrated heuristic, not a claim that every puzzle of a given score feels identical.
+export function estimatePuzzleDifficulty(puzzle) {
+  const cells = puzzle.size * puzzle.size;
+  const pairCount = puzzle.segments.length;
+  let steps = 0;
+  let turns = 0;
+  let lengthSquares = 0;
+  let endpointChoices = 0;
+  for (const segment of puzzle.segments) {
+    const path = segment.solution || [];
+    steps += path.length;
+    lengthSquares += path.length * path.length;
+    for (let i = 2; i < path.length; i++) {
+      const a = path[i - 2], b = path[i - 1], c = path[i];
+      if ((b.r - a.r) !== (c.r - b.r) || (b.c - a.c) !== (c.c - b.c)) turns++;
+    }
+    for (const endpoint of [segment.start, segment.end]) {
+      const degree = neighbors(endpoint, puzzle.size).length;
+      endpointChoices += Math.max(0, degree - 1);
+    }
+  }
+  const meanLength = steps / Math.max(1, pairCount);
+  const lengthVariance = Math.max(0, lengthSquares / Math.max(1, pairCount) - meanLength * meanLength);
+  const turnRate = turns / Math.max(1, cells - pairCount);
+  const sizeScore = ((puzzle.size - 5) / 3) * 24;
+  const pairScore = ((pairCount - 3) / 5) * 18;
+  const routeScore = Math.min(25, turnRate * 42);
+  const varianceScore = Math.min(12, Math.sqrt(lengthVariance) * 2.1);
+  const endpointScore = Math.min(12, endpointChoices / Math.max(1, pairCount * 2) * 8);
+  const score = Math.round(Math.max(0, Math.min(100, 18 + sizeScore + pairScore + routeScore + varianceScore + endpointScore)));
+  return {
+    score,
+    size: puzzle.size,
+    pairs: pairCount,
+    turns,
+    turnRate: Number(turnRate.toFixed(3)),
+    lengthVariance: Number(lengthVariance.toFixed(2)),
+    ambiguityRisk: Math.round(Math.max(0, Math.min(100, 100 - (endpointScore * 2) + turnRate * 18))),
+  };
+}
+
+// Generate several valid candidates, then select the one whose structural difficulty
+// best matches the player's current target. Every candidate carries a known full-board
+// solution, so solvability is guaranteed by construction and checked again before return.
+export function generateAdaptivePuzzle(level, profile = {}, seed = null, mode = 'adaptive') {
+  const rating = Math.max(0, Math.min(100, Number(profile.rating ?? 50)));
+  const feedbackBias = Math.max(-12, Math.min(12, Number(profile.feedbackBias ?? 0)));
+  const defaultSize = Math.min(8, 5 + Math.floor(Math.max(0, level - 1) / 18));
+  const defaultPairs = Math.min(8, Math.max(3, 3 + Math.floor(level / 7)));
+  const sizeShift = mode === 'relaxed' ? -1 : mode === 'challenging' ? 1 : rating >= 88 ? 1 : rating <= 18 ? -1 : 0;
+  const size = Math.max(5, Math.min(8, defaultSize + sizeShift));
+  const pairShift = mode === 'relaxed' ? -1 : mode === 'challenging' ? 1 : rating >= 72 ? 1 : rating <= 28 ? -1 : 0;
+  const pairCount = Math.max(3, Math.min(8, defaultPairs + pairShift, Math.floor((size * size) / 3)));
+  const baseline = estimatePuzzleDifficulty({
+    size,
+    segments: Array.from({ length: pairCount }, (_, i) => ({
+      start: { r: 0, c: i }, end: { r: size - 1, c: i },
+      solution: Array.from({ length: Math.max(2, Math.floor((size * size) / pairCount)) }, (_, j) => ({ r: Math.floor(j / size), c: j % size })),
+    })),
+  }).score;
+  const modeBias = mode === 'relaxed' ? -9 : mode === 'challenging' ? 9 : 0;
+  const target = Math.max(8, Math.min(96, baseline + (rating - 50) * 0.38 + feedbackBias + modeBias));
+  const randomSeed = seed ?? Math.floor(Math.random() * 0xffffffff);
+  const variants = mode === 'relaxed' ? 5 : 7;
+  let best = null;
+  let bestDistance = Infinity;
+  for (let i = 0; i < variants; i++) {
+    const candidateSeed = (randomSeed + Math.imul(i + 1, 0x45d9f3b)) >>> 0;
+    const candidate = generatePuzzle(level, candidateSeed, { size, pairCount });
+    if (!validatePuzzle(candidate)) continue;
+    const score = candidate.difficulty.score;
+    const distance = Math.abs(score - target);
+    // Tiny deterministic variety bonus prevents identical-looking choices dominating ties.
+    const adjustedDistance = distance + ((candidateSeed >>> 4) % 13) / 100;
+    if (adjustedDistance < bestDistance) {
+      best = candidate;
+      bestDistance = adjustedDistance;
+    }
+  }
+  // The generator always has a known route-cover fallback; this branch is defensive.
+  if (!best) best = generatePuzzle(level, randomSeed, { size, pairCount });
+  return {
+    ...best,
+    difficulty: { ...best.difficulty, target: Math.round(target), mode, fit: Math.max(0, 100 - Math.round(bestDistance)) },
+  };
+}
+
+export function updateAdaptiveRating(previousRating = 50, performanceScore = 50, samples = 0) {
+  const prior = Math.max(0, Math.min(100, Number(previousRating)));
+  const observation = Math.max(0, Math.min(100, Number(performanceScore)));
+  const weight = Math.max(0.12, Math.min(0.35, 1 / Math.sqrt(Math.max(1, samples + 1))));
+  return Math.round(prior * (1 - weight) + observation * weight);
 }
