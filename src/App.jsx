@@ -23,7 +23,6 @@ function App() {
   const [showMenu, setShowMenu] = useState(false);
   const [toast, setToast] = useState('');
   const [daily, setDaily] = useState(false);
-  const [moves, setMoves] = useState(0);
   const [releasePulse, setReleasePulse] = useState(0);
   const boardRef = useRef(null);
   const pointerDown = useRef(false);
@@ -93,7 +92,6 @@ function App() {
     setActiveId(null);
     setWon(false);
     setHintCell(null);
-    setMoves(0);
     setDaily(isDaily);
     setShowMenu(false);
   };
@@ -157,7 +155,6 @@ function App() {
     if (same(point, segment.end) || same(point, segment.start)) {
       pointerDown.current = false;
       setActiveId(null);
-      setMoves(m => m + 1);
       const canonicalPath = same(point, segment.start) ? [...next].reverse() : next;
       setReleasePulse(p => p + 1);
       setPaths(prev => {
@@ -276,7 +273,7 @@ function App() {
           {won&&<div className="win-overlay"><div className="win-orb">✦</div><h2 className="mt-4 text-2xl font-medium tracking-tight sm:text-3xl">Beautiful.</h2><p className="mt-2 text-sm text-white/55">You found every connection.</p><button className="next-button mt-6" onClick={()=>installLevel(level+1)}>Next puzzle <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div>}
         </div>
         <div className="mt-5 flex w-full max-w-[590px] items-center justify-between gap-4 px-1"><div className="flex min-w-0 flex-1 items-center gap-3"><div className="progress-track flex-1"><span style={{width:`${progress}%`}}/></div><span className="w-10 text-right text-xs tabular-nums text-white/50">{progress}%</span></div><button className="hint-button" onClick={useHint} disabled={won}><svg viewBox="0 0 24 24"><path d="M9 18h6m-5 3h4m-2-19a7 7 0 0 0-4 12.7c.6.4 1 1.1 1 1.8h6c0-.7.4-1.4 1-1.8A7 7 0 0 0 12 2Z"/></svg><span>Hint</span><span className="hint-number">{hints}</span></button></div>
-        <div className="mt-4 flex items-center gap-2 text-[11px] tracking-wide text-white/30"><span className="status-dot"/>{solvedCount} of {puzzle.segments.length} paths connected <span className="mx-1 text-white/15">·</span>{moves} {moves===1?'move':'moves'}</div>
+        <div className="mt-4 flex items-center gap-2 text-[11px] tracking-wide text-white/30"><span className="status-dot"/>{solvedCount} of {puzzle.segments.length} paths connected</div>
       </section>
       <footer className="relative z-10 mx-auto flex w-full max-w-5xl items-center justify-between px-5 pb-5 text-[10px] tracking-wide text-white/25 sm:px-8"><span>FLOW</span><span>{Math.max(0,best-1)} completed</span></footer>
       {showMenu&&<div className="menu-backdrop" onClick={()=>setShowMenu(false)}><div className="menu-glass" onClick={ev=>ev.stopPropagation()}><button onClick={()=>installLevel(1)}>Restart from level one</button><button onClick={()=>installLevel(level,true)}>Daily puzzle</button><button onClick={()=>{setSound(v=>!v);setShowMenu(false)}}>{sound?'Sound off':'Sound on'}</button><p>Progress saves automatically.</p></div></div>}
