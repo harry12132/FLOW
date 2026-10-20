@@ -35,6 +35,8 @@ function App() {
   const lastPointerCell = useRef(null);
   const audioRef = useRef(null);
   const puzzleStartedAt = useRef(Date.now());
+  const activeElapsedMs = useRef(0);
+  const activeSince = useRef(typeof document !== 'undefined' && document.visibilityState === 'hidden' ? null : Date.now());
   const puzzleMetrics = useRef({ hints: 0, resets: 0, backtracks: 0 });
   const puzzleResultRecorded = useRef(false);
 
@@ -60,6 +62,31 @@ function App() {
     recordEvent('session_start');
     recordEvent('puzzle_start', { level, mode: difficultyMode, variant: puzzle.difficulty?.variant });
   }, []);
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.hidden && activeSince.current !== null) {
+        activeElapsedMs.current += Date.now() - activeSince.current;
+        activeSince.current = null;
+      } else if (!document.hidden && activeSince.current === null) {
+        activeSince.current = Date.now();
+      }
+    };
+    const onPageHide = () => {
+      if (puzzleResultRecorded.current) return;
+      try {
+        const current = readAnalytics();
+        const next = appendAnalyticsEvent(current, 'puzzle_abandon', { level, mode: difficultyMode, reason: 'pagehide' });
+        localStorage.setItem('flow-analytics-v1', JSON.stringify(next));
+      } catch { /* The puzzle remains playable if browser storage is unavailable. */ }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', onPageHide);
+    };
+  }, [level, difficultyMode]);
 
   useEffect(() => {
     const stop = () => {
@@ -112,6 +139,8 @@ function App() {
     const variant = choosePuzzleVariant(adaptive);
     const next = isDaily ? generatePuzzle(nextLevel, daySeed) : generateAdaptivePuzzle(nextLevel, adaptive, null, difficultyMode, variant);
     puzzleStartedAt.current = Date.now();
+    activeElapsedMs.current = 0;
+    activeSince.current = typeof document !== 'undefined' && document.visibilityState === 'hidden' ? null : Date.now();
     puzzleMetrics.current = { hints: 0, resets: 0, backtracks: 0 };
     puzzleResultRecorded.current = false;
     setLevel(nextLevel);
@@ -195,7 +224,7 @@ function App() {
           setBest(b => Math.max(b, level + 1));
           if (!puzzleResultRecorded.current) {
             puzzleResultRecorded.current = true;
-            const elapsedSeconds = (Date.now() - puzzleStartedAt.current) / 1000;
+            const elapsedSeconds = Math.max(0, (activeElapsedMs.current + (activeSince.current === null ? 0 : Date.now() - activeSince.current)) / 1000);
             recordEvent('puzzle_complete', { level, elapsedSeconds: Math.round(elapsedSeconds), hints: puzzleMetrics.current.hints, resets: puzzleMetrics.current.resets, backtracks: puzzleMetrics.current.backtracks, difficulty: puzzle.difficulty?.score, variant: puzzle.difficulty?.variant, daily });
             if (!daily) {
               const score = scorePuzzlePerformance({ puzzle, elapsedSeconds, ...puzzleMetrics.current });
