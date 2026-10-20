@@ -141,12 +141,13 @@ function App() {
     setPaths(prev => ({ ...prev, [segmentId]: next }));
     setHintCell(null);
     beep(500 + Math.min(5, next.length) * 35, 0.025);
-    if (same(point, segment.end)) {
+    if (same(point, segment.end) || same(point, segment.start)) {
       pointerDown.current = false;
       setActiveId(null);
       setMoves(m => m + 1);
+      const canonicalPath = same(point, segment.start) ? [...next].reverse() : next;
       setPaths(prev => {
-        const completed = { ...prev, [segmentId]: next };
+        const completed = { ...prev, [segmentId]: canonicalPath };
         const done = puzzleComplete(puzzle, completed);
         if (done) {
           setWon(true);
@@ -287,7 +288,7 @@ function App() {
                     onPointerDown={e => onCellPointerDown(e, point)}
                     onPointerEnter={() => onCellEnter(point)}
                     onPointerMove={e => { if (e.buttons === 1) onCellEnter(point); }}
-                    style={{ '--path-color': color || 'transparent' }}
+                    style={{ '--path-color': color || 'transparent', borderRight: point.c === puzzle.size - 1 ? 0 : undefined, borderBottom: point.r === puzzle.size - 1 ? 0 : undefined }}
                   >
                     {endpoint && <span className="endpoint-dot" style={{ '--dot-color': endpoint.color }}><span /></span>}
                     {isHint && <span className="hint-pulse" />}
