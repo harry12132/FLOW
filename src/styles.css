@@ -86,7 +86,6 @@ h2 { font-size: 21px; font-weight: 600; letter-spacing: -.6px; margin: 7px 0 0; 
 .board-inner { position: relative; aspect-ratio: 1; width: 100%; overflow: hidden; border-radius: 7px; background-color: #f8f8f3; touch-action: none; user-select: none; }
 .cell-grid { position: absolute; inset: 0; display: grid; }
 .cell { position: relative; border-right: 1px solid #e9eae3; border-bottom: 1px solid #e9eae3; min-width: 0; min-height: 0; touch-action: none; }
-.cell:nth-child(${'var(--size)'}n) { border-right: 0; }
 .cell.endpoint-cell { cursor: grab; }
 .cell.endpoint-cell:active { cursor: grabbing; }
 .cell.has-path { background: color-mix(in srgb, var(--path-color) 9%, #f8f8f3); }
