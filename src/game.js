@@ -242,7 +242,7 @@ export function estimatePuzzleDifficulty(puzzle) {
 // Generate several valid candidates, then select the one whose structural difficulty
 // best matches the player's current target. Every candidate carries a known full-board
 // solution, so solvability is guaranteed by construction and checked again before return.
-export function generateAdaptivePuzzle(level, profile = {}, seed = null, mode = 'adaptive') {
+export function generateAdaptivePuzzle(level, profile = {}, seed = null, mode = 'adaptive', variant = 'balanced') {
   const rating = Math.max(0, Math.min(100, Number(profile.rating ?? 50)));
   const feedbackBias = Math.max(-12, Math.min(12, Number(profile.feedbackBias ?? 0)));
   const defaultSize = Math.min(8, 5 + Math.floor(Math.max(0, level - 1) / 18));
@@ -251,7 +251,7 @@ export function generateAdaptivePuzzle(level, profile = {}, seed = null, mode = 
   const size = Math.max(5, Math.min(8, defaultSize + sizeShift));
   const pairShift = mode === 'relaxed' ? -1 : mode === 'challenging' ? 1 : rating >= 72 ? 1 : rating <= 28 ? -1 : 0;
   const pairCount = Math.max(3, Math.min(8, defaultPairs + pairShift, Math.floor((size * size) / 3)));
-  const modeBias = mode === 'relaxed' ? -9 : mode === 'challenging' ? 9 : 0;
+  const modeBias = (mode === 'relaxed' ? -9 : mode === 'challenging' ? 9 : 0) + ({ gentle: -7, balanced: 0, spicy: 7 }[variant] ?? 0);
   const randomSeed = seed ?? Math.floor(Math.random() * 0xffffffff);
   const variants = mode === 'relaxed' ? 5 : 7;
   const candidates = [];
@@ -278,7 +278,7 @@ export function generateAdaptivePuzzle(level, profile = {}, seed = null, mode = 
   }
   return {
     ...best,
-    difficulty: { ...best.difficulty, target: Math.round(target), mode, fit: Math.max(0, 100 - Math.round(bestDistance)) },
+    difficulty: { ...best.difficulty, target: Math.round(target), mode, variant, fit: Math.max(0, 100 - Math.round(bestDistance)) },
   };
 }
 
