@@ -14,41 +14,28 @@
 @media(max-width:520px){header{padding-top:max(1.1rem,env(safe-area-inset-top))!important}.glass-icon{width:37px;height:37px;border-radius:13px}.board-glass{padding:9px;border-radius:24px}.board-inner{border-radius:16px}.path-line{stroke-width:7}.path-halo{stroke-width:13}.endpoint-dot{width:45%;height:45%}.hint-button{gap:6px;padding:9px 10px}.ambient{filter:blur(65px)}}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 
 
-/* FLOW 1.2: one readable board grid, with the real lens doing the optical work. */
+/* Quiet glass finish: keep the board geometry still and the puzzle crisp. */
 .board-glow{display:none}
 .cell-grid{z-index:2}
 .path-layer{z-index:1}
-.board-lens{display:block!important;overflow:visible!important;max-width:none!important;max-height:none!important}
-.board-lens .glass{
-  display:flex!important;
-  width:100%!important;
-  height:100%!important;
-  padding:0!important;
-  gap:0!important;
-  border-radius:20px!important;
-  background:transparent!important;
-  box-shadow:inset 0 1px 0 #ffffff45,inset 0 0 0 1px #ffffff12!important;
-  overflow:hidden!important;
+.board-glass{
+  background:linear-gradient(145deg,rgba(255,255,255,.055),rgba(255,255,255,.012) 42%,rgba(91,183,210,.035));
+  border:1px solid rgba(210,245,255,.105);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 18px 55px rgba(0,0,0,.13);
+  backdrop-filter:blur(8px) saturate(118%);
+  -webkit-backdrop-filter:blur(8px) saturate(118%);
 }
-.board-lens .glass__warp{border-radius:inherit}
-.board-lens-fill{display:block;width:min(556px,calc(100vw - 52px));aspect-ratio:1;flex:none;pointer-events:none}
-.board-inner{box-shadow:inset 0 1px #ffffff20,inset 0 0 0 1px #ffffff06;will-change:transform}
-.board-inner.glass-releasing-a{animation:glass-release-a .48s cubic-bezier(.18,.82,.25,1) both}
-.board-inner.glass-releasing-b{animation:glass-release-b .48s cubic-bezier(.18,.82,.25,1) both}
-@keyframes glass-release-a{0%{transform:scale(1)}22%{transform:scale(1.009, .994)}48%{transform:scale(.997,1.004)}72%{transform:scale(1.002,.999)}100%{transform:scale(1)}}
-@keyframes glass-release-b{0%{transform:scale(1)}22%{transform:scale(.994,1.009)}48%{transform:scale(1.004,.997)}72%{transform:scale(.999,1.002)}100%{transform:scale(1)}}
+.board-inner{
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.11),inset 0 0 0 1px rgba(255,255,255,.035);
+}
 .path-halo{opacity:.09;filter:blur(3px)}
 .active-path .path-halo{opacity:.2;filter:blur(5px)}
-.path-line{filter:drop-shadow(0 0 2px #ffffff14)}
-.active-path .path-line{filter:drop-shadow(0 0 4px #ffffff22)}
-.cell{border-color:#d8eff00a}
+.path-line{filter:drop-shadow(0 0 2px rgba(255,255,255,.08))}
+.active-path .path-line{filter:drop-shadow(0 0 4px rgba(255,255,255,.13))}
+.cell{border-color:rgba(216,239,240,.035)}
 .cell.has-path{background:color-mix(in srgb,var(--path-color) 8%,transparent)}
-.endpoint-dot{box-shadow:0 0 0 3px #ffffff0b,0 0 12px color-mix(in srgb,var(--dot-color) 32%,transparent),inset 0 1px #ffffff70}
+.endpoint-dot{box-shadow:0 0 0 3px rgba(255,255,255,.035),0 0 10px color-mix(in srgb,var(--dot-color) 24%,transparent),inset 0 1px rgba(255,255,255,.45)}
 .progress-track span{transition:width .34s cubic-bezier(.18,.82,.25,1)}
 @media(max-width:520px){
-  .board-lens .glass{border-radius:16px!important}
-  .board-lens-fill{width:calc(100vw - 52px)}
-}
-@media(prefers-reduced-motion:reduce){
-  .board-inner.glass-releasing-a,.board-inner.glass-releasing-b{animation:none}
+  .board-glass{backdrop-filter:blur(6px) saturate(115%);-webkit-backdrop-filter:blur(6px) saturate(115%)}
 }
