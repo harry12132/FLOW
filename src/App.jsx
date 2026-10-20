@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import LiquidGlass from 'liquid-glass-react';
 import { cellId, createEmptyPaths, generatePuzzle, getOccupied, isAdjacent, puzzleComplete } from './game.js';
 
 const STORE = 'flow-save-v1';
@@ -56,10 +57,10 @@ function App() {
       if (ctx.state === 'suspended') ctx.resume();
       const oscillator = ctx.createOscillator();
       const gain = ctx.createGain();
-      oscillator.type = 'sine';
+      oscillator.type = 'triangle';
       oscillator.frequency.value = frequency;
       gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.07, ctx.currentTime + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.025, ctx.currentTime + 0.012);
       gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
       oscillator.connect(gain);
       gain.connect(ctx.destination);
@@ -226,94 +227,58 @@ function App() {
   }).join(' ');
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <a className="wordmark" href="#" onClick={(e) => { e.preventDefault(); installLevel(1); }}>
-          <span className="logo-mark"><i /><i /><i /><i /></span>
-          <span>flow<span className="wordmark-period">.</span></span>
-        </a>
-        <div className="top-actions">
-          <button className="icon-button sound-button" onClick={() => setSound(v => !v)} aria-label={sound ? 'Turn sound off' : 'Turn sound on'} title={sound ? 'Sound on' : 'Sound off'}>
-            {sound ? <svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg> : <svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="m16 9 5 6m0-6-5 6"/></svg>}
-          </button>
-          <button className="avatar-button" onClick={() => setShowMenu(v => !v)} aria-label="Open game menu">H</button>
-        </div>
+    <main className="min-h-screen relative overflow-hidden text-white selection:bg-cyan-200/30">
+      <div className="ambient ambient-one" /><div className="ambient ambient-two" /><div className="ambient ambient-three" />
+      <header className="relative z-10 mx-auto flex w-full max-w-5xl items-center justify-between px-5 py-5 sm:px-8">
+        <button className="brand flex items-center gap-3" onClick={() => installLevel(1)} aria-label="FLOW home">
+          <span className="brand-symbol"><i /><i /><i /><i /></span>
+          <span className="text-[21px] font-semibold tracking-[-0.08em]">flow<span className="text-cyan-200">.</span></span>
+        </button>
+        <LiquidGlass displacementScale={34} blurAmount={0.08} saturation={145} aberrationIntensity={1.2} elasticity={0.18} cornerRadius={19} padding="5px" className="liquid-controls">
+          <div className="flex items-center gap-1.5">
+            <button className="glass-icon" onClick={() => setSound(v => !v)} aria-label={sound ? 'Mute sound' : 'Enable sound'} title={sound ? 'Sound on' : 'Sound off'}>{sound ? <svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg> : <svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="m16 9 5 6m0-6-5 6"/></svg>}</button>
+            <button className="glass-icon" onClick={reset} aria-label="Restart puzzle" title="Restart"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5"/></svg></button>
+            <button className="glass-icon" onClick={() => setShowMenu(v => !v)} aria-label="Game options" title="Options"><span className="dots">···</span></button>
+          </div>
+        </LiquidGlass>
       </header>
 
-      <section className="game-layout">
-        <aside className="side-panel">
-          <div className="eyebrow"><span className="live-dot" /> YOUR DAILY PAUSE</div>
-          <h1>A little<br />space to <em>think.</em></h1>
-          <p className="intro">Connect the colours. Fill the board. Find your flow.</p>
-          <div className="level-card">
-            <div className="level-label">{daily ? 'DAILY CHALLENGE' : 'CURRENT LEVEL'}</div>
-            <div className="level-number">{daily ? 'TODAY' : String(level).padStart(3, '0')}</div>
-            <div className="level-meta"><span>{puzzle.size} × {puzzle.size} grid</span><span className="meta-separator">·</span><span>{puzzle.segments.length} colours</span></div>
-            <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
-            <div className="progress-caption"><span>{filled} of {total} cells</span><span>{progress}%</span></div>
-          </div>
-          <div className="stats-row">
-            <div className="stat"><span className="stat-value">{Math.max(0, best - 1)}</span><span className="stat-label">BEST LEVEL</span></div>
-            <div className="stat-divider" />
-            <div className="stat"><span className="stat-value">{solvedCount}<span className="stat-total">/{puzzle.segments.length}</span></span><span className="stat-label">PATHS FOUND</span></div>
-          </div>
-          <div className="controls">
-            <button className="primary-button" onClick={reset}><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5"/></svg>Start over</button>
-            <button className="secondary-button" onClick={useHint}><svg viewBox="0 0 24 24"><path d="M9 18h6m-5 3h4m-2-19a7 7 0 0 0-4 12.7c.6.4 1 1.1 1 1.8h6c0-.7.4-1.4 1-1.8A7 7 0 0 0 12 2Z"/></svg>Hint <span className="hint-count">{hints}</span></button>
-          </div>
-          <button className="daily-link" onClick={() => installLevel(level, true)}><span className="calendar-icon">✳</span><span><strong>Daily challenge</strong><small>A fresh board, every day</small></span><span className="arrow">↗</span></button>
-          <p className="quiet-note">No timer. No pressure.<br />Just you and the puzzle.</p>
-        </aside>
+      <section className="relative z-10 mx-auto flex w-full max-w-5xl flex-col items-center px-4 pb-10 pt-5 sm:px-8 sm:pt-8">
+        <div className="mb-5 flex items-center gap-3"><span className="level-pill">{daily ? 'DAILY' : `LEVEL ${String(level).padStart(3, '0')}`}</span><span className="text-sm text-white/45">{puzzle.size} × {puzzle.size}</span></div>
+        <h1 className="mb-2 text-center text-4xl font-medium tracking-[-0.075em] sm:text-5xl">{won ? 'Perfectly connected.' : 'Find your flow.'}</h1>
+        <p className="mb-7 text-center text-sm text-white/45 sm:mb-9">{won ? 'Every colour. Every cell.' : 'Connect matching colours. Fill every cell.'}</p>
 
-        <section className="board-column">
-          <div className="board-heading">
-            <div><span className="board-kicker">PUZZLE {daily ? 'OF THE DAY' : String(level).padStart(3, '0')}</span><h2>{won ? 'Beautifully done.' : 'Find the connections.'}</h2></div>
-            <div className="board-tools"><span className="difficulty"><i />{level < 8 ? 'Warming up' : level < 25 ? 'Getting tricky' : level < 55 ? 'Brain at work' : 'Deep focus'}</span><button className="tiny-button" onClick={() => { setShowMenu(v => !v); }} aria-label="More options">•••</button></div>
-          </div>
-
-          <div className={`board-frame ${won ? 'is-won' : ''}`} ref={boardRef}>
-            <div className="board-inner" style={{ '--size': puzzle.size }} onPointerMove={event => { if (pointerDown.current && activeId !== null) { const point = cellFromTarget(document.elementFromPoint(event.clientX, event.clientY)); if (point) onCellEnter(point); } }}>
-              <svg className="path-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Puzzle paths">
-                {pathPoints.map(({ segment, path }) => <g key={segment.id}>
-                  <path className="path-shadow" d={pathD(path)} stroke={segment.color} />
-                  <path className="path-line" d={pathD(path)} stroke={segment.color} />
-                </g>)}
-              </svg>
-              <div className="cell-grid" style={{ gridTemplateColumns: `repeat(${puzzle.size}, minmax(0, 1fr))` }}>
-                {grid.map(point => {
-                  const endpoint = isEndpoint(point);
-                  const owner = Object.entries(paths).find(([, path]) => path.some(p => same(p, point)));
-                  const color = endpoint?.color || (owner ? puzzle.segments.find(s => s.id === Number(owner[0]))?.color : null);
-                  const isHint = same(point, hintCell);
-                  const isPathEnd = owner && paths[Number(owner[0])]?.at(-1) && same(paths[Number(owner[0])].at(-1), point);
-                  return <div
-                    key={cellId(point)}
-                    data-cell={cellId(point)}
-                    className={`cell ${endpoint ? 'endpoint-cell' : ''} ${owner ? 'has-path' : ''} ${isHint ? 'hint-cell' : ''} ${isPathEnd ? 'path-end' : ''}`}
-                    onPointerDown={e => onCellPointerDown(e, point)}
-                    style={{ '--path-color': color || 'transparent', borderRight: point.c === puzzle.size - 1 ? 0 : undefined, borderBottom: point.r === puzzle.size - 1 ? 0 : undefined }}
-                  >
-                    {endpoint && <span className="endpoint-dot" style={{ '--dot-color': endpoint.color }}><span /></span>}
-                    {isHint && <span className="hint-pulse" />}
-                  </div>;
-                })}
-              </div>
+        <div className="board-glass relative w-full max-w-[590px] rounded-[30px] p-3 sm:p-4" ref={boardRef}>
+          <div className={`board-inner relative aspect-square w-full overflow-hidden rounded-[20px] ${won ? 'board-won' : ''}`} style={{ '--size': puzzle.size }} onPointerMove={event => { if (pointerDown.current && activeId !== null) { const point = cellFromTarget(document.elementFromPoint(event.clientX, event.clientY)); if (point) onCellEnter(point); } }}>
+            <div className="board-glow" />
+            <svg className="path-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+              {pathPoints.map(({ segment, path }) => <g key={segment.id} className={activeId === segment.id ? 'active-path' : ''}><path className="path-halo" d={pathD(path)} stroke={segment.color} /><path className="path-line" d={pathD(path)} stroke={segment.color} /></g>)}
+            </svg>
+            <div className="cell-grid" style={{ gridTemplateColumns: `repeat(${puzzle.size}, minmax(0, 1fr))` }}>
+              {grid.map(point => {
+                const endpoint = isEndpoint(point);
+                const owner = Object.entries(paths).find(([, path]) => path.some(p => same(p, point)));
+                const color = endpoint?.color || (owner ? puzzle.segments.find(s => s.id === Number(owner[0]))?.color : null);
+                const isHint = same(point, hintCell);
+                const isPathEnd = owner && paths[Number(owner[0])]?.at(-1) && same(paths[Number(owner[0])].at(-1), point);
+                return <div key={cellId(point)} data-cell={cellId(point)} className={`cell ${endpoint ? 'endpoint-cell' : ''} ${owner ? 'has-path' : ''} ${isHint ? 'hint-cell' : ''} ${isPathEnd ? 'path-end' : ''}`} onPointerDown={e => onCellPointerDown(e, point)} style={{ '--path-color': color || 'transparent', borderRight: point.c === puzzle.size - 1 ? 0 : undefined, borderBottom: point.r === puzzle.size - 1 ? 0 : undefined }}>
+                  {endpoint && <span className="endpoint-dot" style={{ '--dot-color': endpoint.color }}><span /></span>}{isHint && <span className="hint-pulse" />}
+                </div>;
+              })}
             </div>
-            {won && <div className="win-confetti" aria-hidden="true">{Array.from({ length: 18 }, (_, i) => <i key={i} style={{ '--i': i }} />)}</div>}
-            {won && <div className="win-card"><span className="win-spark">✳</span><h3>Every path, found.</h3><p>You made room for every colour.</p><button className="primary-button" onClick={() => installLevel(level + 1)}>Next level <span>→</span></button><button className="text-button" onClick={() => installLevel(level + 1)}>Keep the flow going</button></div>}
           </div>
+          {won && <div className="win-overlay"><div className="win-orb">✦</div><h2 className="mt-4 text-2xl font-medium tracking-tight sm:text-3xl">Beautiful.</h2><p className="mt-2 text-sm text-white/55">You found every connection.</p><button className="next-button mt-6" onClick={() => installLevel(level + 1)}>Next puzzle <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div>}
+        </div>
 
-          <div className="board-footer">
-            <div className="legend"><span className="legend-dot" />Drag from one dot to its match</div>
-            <div className="footer-right"><span>{moves} {moves === 1 ? 'path' : 'paths'} completed</span><span className="footer-sep">/</span><span>{puzzle.size * puzzle.size - filled} open cells</span></div>
-          </div>
-          <div className="mobile-controls"><button className="secondary-button" onClick={reset}>↺ Restart</button><button className="primary-button" onClick={useHint}>Hint · {hints}</button></div>
-        </section>
+        <div className="mt-5 flex w-full max-w-[590px] items-center justify-between gap-4 px-1">
+          <div className="flex min-w-0 flex-1 items-center gap-3"><div className="progress-track flex-1"><span style={{ width: `${progress}%` }} /></div><span className="w-10 text-right text-xs tabular-nums text-white/50">{progress}%</span></div>
+          <button className="hint-button" onClick={useHint} disabled={won}><svg viewBox="0 0 24 24"><path d="M9 18h6m-5 3h4m-2-19a7 7 0 0 0-4 12.7c.6.4 1 1.1 1 1.8h6c0-.7.4-1.4 1-1.8A7 7 0 0 0 12 2Z"/></svg><span>Hint</span><span className="hint-number">{hints}</span></button>
+        </div>
+        <div className="mt-4 flex items-center gap-2 text-[11px] tracking-wide text-white/30"><span className="status-dot" />{solvedCount} of {puzzle.segments.length} paths connected</div>
       </section>
 
-      <footer className="bottom-bar"><span>MADE FOR THE IN-BETWEEN MOMENTS.</span><span>Take your time. <span className="footer-heart">♥</span></span><button onClick={() => notify('More puzzle modes are on the way.')}>ABOUT FLOW <span>↗</span></button></footer>
-
-      {showMenu && <div className="menu-backdrop" onClick={() => setShowMenu(false)}><div className="menu-popover" onClick={e => e.stopPropagation()}><div className="menu-title">Make yourself at home</div><button onClick={() => installLevel(1)}>↗ <span>Start from level one</span></button><button onClick={() => installLevel(level, true)}>✳ <span>Play today's challenge</span></button><button onClick={() => { setSound(v => !v); setShowMenu(false); }}>♫ <span>{sound ? 'Turn sound off' : 'Turn sound on'}</span></button><p>Your progress is saved on this device.</p></div></div>}
+      <footer className="relative z-10 mx-auto flex w-full max-w-5xl items-center justify-between px-5 pb-5 text-[10px] tracking-wide text-white/25 sm:px-8"><span>FLOW</span><span>{Math.max(0, best - 1)} completed</span></footer>
+      {showMenu && <div className="menu-backdrop" onClick={() => setShowMenu(false)}><div className="menu-glass" onClick={e => e.stopPropagation()}><button onClick={() => installLevel(1)}>Restart from level one</button><button onClick={() => installLevel(level, true)}>Daily puzzle</button><button onClick={() => { setSound(v => !v); setShowMenu(false); }}>{sound ? 'Sound off' : 'Sound on'}</button><p>Progress saves automatically.</p></div></div>}
       {toast && <div className="toast" role="status">{toast}</div>}
     </main>
   );
