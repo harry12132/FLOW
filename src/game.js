@@ -177,6 +177,76 @@ export function validatePuzzle(puzzle) {
 }
 
 
+// Bounded exact-cover search for endpoint ambiguity. Large boards may return "unknown"
+// rather than blocking play; this is a diagnostic, not part of the hot gameplay path.
+export function analyzePuzzleAmbiguity(puzzle, maxNodes = 12000) {
+  if (!validatePuzzle(puzzle)) return { status: 'invalid', solutionsFound: 0, nodes: 0, exhaustive: true };
+  const size = puzzle.size;
+  const allCells = size * size;
+  const endpointKeys = new Set(puzzle.segments.flatMap(segment => [key(segment.start), key(segment.end)]));
+  const segments = [...puzzle.segments].sort((a, b) => {
+    const distance = s => Math.abs(s.start.r - s.end.r) + Math.abs(s.start.c - s.end.c);
+    return distance(a) - distance(b);
+  });
+  const occupied = new Set();
+  let nodes = 0;
+  let solutionsFound = 0;
+  let exhausted = false;
+
+  const solveSegment = index => {
+    if (solutionsFound >= 2 || exhausted) return;
+    if (index === segments.length) {
+      if (occupied.size === allCells) solutionsFound++;
+      return;
+    }
+    const segment = segments[index];
+    const startKey = key(segment.start);
+    const targetKey = key(segment.end);
+    const local = new Set([startKey]);
+    const path = [segment.start];
+
+    const walk = current => {
+      nodes++;
+      if (nodes > maxNodes) { exhausted = true; return; }
+      if (solutionsFound >= 2 || exhausted) return;
+      const currentKey = key(current);
+      if (currentKey === targetKey) {
+        if (path.length < 2) return;
+        for (const point of path) occupied.add(key(point));
+        solveSegment(index + 1);
+        for (const point of path) occupied.delete(key(point));
+        return;
+      }
+      const choices = neighbors(current, size).sort((a, b) => {
+        const da = Math.abs(a.r - segment.end.r) + Math.abs(a.c - segment.end.c);
+        const db = Math.abs(b.r - segment.end.r) + Math.abs(b.c - segment.end.c);
+        return da - db;
+      });
+      for (const next of choices) {
+        const nextKey = key(next);
+        if (local.has(nextKey) || occupied.has(nextKey)) continue;
+        if (endpointKeys.has(nextKey) && nextKey !== targetKey) continue;
+        local.add(nextKey);
+        path.push(next);
+        walk(next);
+        path.pop();
+        local.delete(nextKey);
+        if (solutionsFound >= 2 || exhausted) return;
+      }
+    };
+    walk(segment.start);
+  };
+
+  solveSegment(0);
+  return {
+    status: solutionsFound >= 2 ? 'ambiguous' : exhausted ? 'unknown' : solutionsFound === 1 ? 'unique' : 'unsolvable',
+    solutionsFound,
+    nodes: Math.min(nodes, maxNodes),
+    exhaustive: !exhausted,
+  };
+}
+
+
 // FLOW's adaptive difficulty model. It estimates challenge fit from observed play,
 // not from a judgement about the player's intelligence.
 export function getAdaptiveLevel(level, rating = 50) {
