@@ -172,3 +172,29 @@ export function validatePuzzle(puzzle) {
   }
   return total === puzzle.size * puzzle.size;
 }
+
+
+// FLOW's adaptive difficulty model. It estimates challenge fit from observed play,
+// not from a judgement about the player's intelligence.
+export function getAdaptiveLevel(level, rating = 50) {
+  const offset = rating >= 80 ? 5
+    : rating >= 70 ? 3
+    : rating >= 60 ? 1
+    : rating < 25 ? -5
+    : rating < 35 ? -3
+    : rating < 45 ? -1
+    : 0;
+  return Math.max(1, level + offset);
+}
+
+export function scorePuzzlePerformance({ puzzle, elapsedSeconds, hints = 0, resets = 0, backtracks = 0 }) {
+  const expectedSeconds = 18 + puzzle.size * puzzle.size * 0.65 + puzzle.segments.length * 4.5;
+  const speedScore = 50 + (1 - Math.max(0, elapsedSeconds) / expectedSeconds) * 35;
+  const supportPenalty = hints * 9 + resets * 8 + backtracks * 1.5;
+  return Math.max(0, Math.min(100, speedScore - supportPenalty));
+}
+
+export function updateAdaptiveRating(previousRating = 50, performanceScore = 50) {
+  // Smooth updates prevent one unusually easy or difficult puzzle changing the game abruptly.
+  return Math.round(previousRating * 0.7 + performanceScore * 0.3);
+}
