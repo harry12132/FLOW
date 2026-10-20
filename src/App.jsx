@@ -36,11 +36,11 @@ function App() {
   const [won, setWon] = useState(false);
   const [hints, setHints] = useState(3);
   const [hintCell, setHintCell] = useState(null);
+  const [hintLine, setHintLine] = useState(null);
   const [showMenu, setShowMenu] = useState(false);
   const [toast, setToast] = useState('');
   const [daily, setDaily] = useState(false);
   const [showStats, setShowStats] = useState(false);
-  const [feedback, setFeedback] = useState(null);
   const [analytics, setAnalytics] = useState(() => readAnalytics());
   const sessionRecorded = useRef(false);
   const boardRef = useRef(null);
@@ -172,7 +172,7 @@ function App() {
     setActiveId(null);
     setWon(false);
     setHintCell(null);
-    setFeedback(null);
+    setHintLine(null);
     setDaily(isDaily);
     recordEvent('puzzle_start', { level: nextLevel, mode: isDaily ? 'daily' : difficultyMode, variant: next.difficulty?.variant, difficulty: next.difficulty?.score });
     setShowMenu(false);
@@ -184,6 +184,7 @@ function App() {
     setActiveId(null);
     setWon(false);
     setHintCell(null);
+    setHintLine(null);
     beep(300, 0.07);
   };
 
@@ -208,6 +209,7 @@ function App() {
     pointerDown.current = true;
     lastPointerCell.current = cellId(seed);
     setHintCell(null);
+    setHintLine(null);
     beep(420, 0.04);
   };
 
@@ -234,6 +236,7 @@ function App() {
     const next = [...current, point];
     setPaths(prev => ({ ...prev, [segmentId]: next }));
     setHintCell(null);
+    setHintLine(null);
     beep(500 + Math.min(5, next.length) * 35, 0.025);
     if (same(point, segment.end) || same(point, segment.start)) {
       pointerDown.current = false;
@@ -300,15 +303,27 @@ function App() {
     if (hints <= 0 || won) { notify(hints <= 0 ? 'No hints left' : 'Already solved'); return; }
     const segment = puzzle.segments.find(s => {
       const path = paths[s.id] || [];
-      return path.length < s.solution.length || !same(path.at(-1), s.end);
+      return !(path.length >= 2 && same(path[0], s.start) && same(path.at(-1), s.end));
     });
-    if (!segment) return;
+    if (!segment) { notify('Every path is connected'); return; }
     const current = paths[segment.id] || [];
-    const nextPoint = segment.solution.find((p, i) => i >= current.length && !current.some(q => same(p, q)));
+    const reverse = current.length > 0 && same(current[0], segment.end);
+    const route = reverse ? [...segment.solution].reverse() : segment.solution;
+    const anchor = current.length ? current.at(-1) : route[0];
+    const anchorIndex = route.findIndex(point => same(point, anchor));
+    const nextPoint = anchorIndex >= 0 ? route[anchorIndex + 1] : null;
+    if (!nextPoint) {
+      const fallbackIndex = route.findIndex(point => !current.some(existing => same(existing, point)));
+      if (fallbackIndex < 0) { notify('Try completing this connection'); return; }
+      setHintCell(route[fallbackIndex]);
+      setHintLine(null);
+    } else {
+      setHintCell(nextPoint);
+      setHintLine([anchor, nextPoint]);
+    }
     puzzleMetrics.current.hints += 1;
-    setHintCell(nextPoint || segment.solution[Math.min(current.length, segment.solution.length - 1)]);
     setHints(h => h - 1);
-    notify('A little nudge');
+    notify('Highlighted the next correct step');
     beep(680, 0.1);
   };
 
@@ -326,18 +341,6 @@ function App() {
       if (error?.name !== 'AbortError') notify('Could not share right now');
     }
     setShowMenu(false);
-  };
-
-  const giveFeedback = (rating) => {
-    if (feedback) return;
-    setFeedback(rating);
-    recordEvent('feedback', { rating, level, variant: puzzle.difficulty?.variant, difficulty: puzzle.difficulty?.score });
-    const reward = rating === 'balanced' ? 1 : rating === 'easy' ? 0.55 : 0.15;
-    setAdaptive(previous => ({
-      ...recordVariantReward(previous, puzzle.difficulty?.variant || 'balanced', reward),
-      feedbackBias: Math.max(-12, Math.min(12, (previous.feedbackBias || 0) + (rating === 'easy' ? 3 : rating === 'hard' ? -4 : 0))),
-    }));
-    notify(rating === 'balanced' ? 'Got it. More like this.' : rating === 'easy' ? 'Got it. I’ll raise the challenge.' : 'Got it. I’ll ease the challenge.');
   };
 
   const pathFor = (segment) => paths[segment.id] || [];
@@ -387,14 +390,14 @@ function App() {
           <div className={`board-inner relative aspect-square w-full overflow-hidden rounded-[20px] ${won?'board-won':''}`} style={{'--size':puzzle.size}} onPointerMove={event=>{if(pointerDown.current&&activeId!==null){const point=cellFromTarget(document.elementFromPoint(event.clientX,event.clientY));if(point)onCellEnter(point)}}}>
             <GlassCanvas size={puzzle.size} activePath={activeGlassPath} />
             <div className="board-glow"/>
-            <svg className="path-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">{pathPoints.map(({segment,path})=><g key={segment.id} className={activeId===segment.id?'active-path':''}><path className="path-halo" d={pathD(path)} stroke={segment.color}/><path className="path-line" d={pathD(path)} stroke={segment.color}/></g>)}</svg>
+            <svg className="path-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">{hintLine&&<path className="hint-guide" d={pathD(hintLine)}/ >}{pathPoints.map(({segment,path})=><g key={segment.id} className={activeId===segment.id?'active-path':''}><path className="path-halo" d={pathD(path)} stroke={segment.color}/><path className="path-line" d={pathD(path)} stroke={segment.color}/></g>)}</svg>
             <div className="cell-grid" style={{gridTemplateColumns:`repeat(${puzzle.size},minmax(0,1fr))`}}>{grid.map(point=>{
               const endpoint=isEndpoint(point),owner=Object.entries(paths).find(([,path])=>path.some(p=>same(p,point)));
               const color=endpoint?.color||(owner?puzzle.segments.find(s=>s.id===Number(owner[0]))?.color:null),isHint=same(point,hintCell),isPathEnd=owner&&paths[Number(owner[0])]?.at(-1)&&same(paths[Number(owner[0])].at(-1),point);
               return <div key={cellId(point)} data-cell={cellId(point)} className={`cell ${endpoint?'endpoint-cell':''} ${owner?'has-path':''} ${isHint?'hint-cell':''} ${isPathEnd?'path-end':''}`} onPointerDown={ev=>onCellPointerDown(ev,point)} style={{'--path-color':color||'transparent',borderRight:point.c===puzzle.size-1?0:undefined,borderBottom:point.r===puzzle.size-1?0:undefined}}>{endpoint&&<span className="endpoint-dot" style={{'--dot-color':endpoint.color}}><span/></span>}{isHint&&<span className="hint-pulse"/>}</div>
             })}</div>
           </div>
-          {won&&<div className="win-overlay"><div className="win-orb">✦</div><h2 className="mt-4 text-2xl font-medium tracking-tight sm:text-3xl">Beautiful.</h2><p className="mt-2 text-sm text-white/55">You found every connection.</p><div className="feedback-row"><span>How did that feel?</span><div><button className={feedback==='easy'?'selected':''} onClick={()=>giveFeedback('easy')}>Too easy</button><button className={feedback==='balanced'?'selected':''} onClick={()=>giveFeedback('balanced')}>Just right</button><button className={feedback==='hard'?'selected':''} onClick={()=>giveFeedback('hard')}>Too hard</button></div></div><button className="next-button mt-5" onClick={()=>installLevel(level+1)}>Next puzzle <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div>}
+          {won&&<div className="win-overlay"><div className="win-orb">✦</div><h2 className="mt-4 text-2xl font-medium tracking-tight sm:text-3xl">Beautiful.</h2><p className="mt-2 text-sm text-white/55">You found every connection.</p><button type="button" className="next-button mt-5" onClick={()=>installLevel(level+1)}>Next puzzle <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div>}
         </div>
         <div className="mt-5 flex w-full max-w-[590px] items-center justify-between gap-4 px-1"><div className="flex min-w-0 flex-1 items-center gap-3"><div className="progress-track flex-1"><span style={{width:`${progress}%`}}/></div><span className="w-10 text-right text-xs tabular-nums text-white/50">{progress}%</span></div><button className="hint-button" onClick={useHint} disabled={won}><svg viewBox="0 0 24 24"><path d="M9 18h6m-5 3h4m-2-19a7 7 0 0 0-4 12.7c.6.4 1 1.1 1 1.8h6c0-.7.4-1.4 1-1.8A7 7 0 0 0 12 2Z"/></svg><span>Hint</span><span className="hint-number">{hints}</span></button></div>
         <div className="mt-4 flex items-center gap-2 text-[11px] tracking-wide text-white/30"><span className="status-dot"/>{solvedCount} of {puzzle.segments.length} paths connected</div>
