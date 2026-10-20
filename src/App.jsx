@@ -34,7 +34,6 @@ function App() {
   const pointerDown = useRef(false);
   const lastPointerCell = useRef(null);
   const audioRef = useRef(null);
-  const puzzleStartedAt = useRef(Date.now());
   const activeElapsedMs = useRef(0);
   const activeSince = useRef(typeof document !== 'undefined' && document.visibilityState === 'hidden' ? null : Date.now());
   const puzzleMetrics = useRef({ hints: 0, resets: 0, backtracks: 0 });
