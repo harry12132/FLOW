@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import LiquidGlass from 'liquid-glass-react';
+import GlassCanvas from './GlassCanvas.jsx';
 import { cellId, createEmptyPaths, generatePuzzle, getOccupied, isAdjacent, puzzleComplete } from './game.js';
 
 const STORE = 'flow-save-v1';
@@ -38,14 +39,21 @@ function App() {
   }, [level, best, sound]);
 
   useEffect(() => {
-    const stop = () => { pointerDown.current = false; setActiveId(null); };
+    const stop = () => {
+      if (pointerDown.current && activeId !== null) {
+        setPaths(prev => ({ ...prev, [activeId]: [] }));
+      }
+      pointerDown.current = false;
+      lastPointerCell.current = null;
+      setActiveId(null);
+    };
     window.addEventListener('pointerup', stop);
     window.addEventListener('pointercancel', stop);
     return () => {
       window.removeEventListener('pointerup', stop);
       window.removeEventListener('pointercancel', stop);
     };
-  }, []);
+  }, [activeId]);
 
   const beep = useCallback((frequency = 520, duration = 0.06) => {
     if (!sound) return;
@@ -219,6 +227,7 @@ function App() {
     const p = pathFor(s);
     return p.length ? [{ segment: s, path: p }] : [];
   });
+  const activeGlassPath = activeId === null ? [] : (paths[activeId] || []);
 
   const pathD = (path) => {
     const points = path.map(p => ({ x: (p.c + 0.5) * 100 / puzzle.size, y: (p.r + 0.5) * 100 / puzzle.size }));
@@ -251,6 +260,7 @@ function App() {
         <p className="mb-7 text-center text-sm text-white/45 sm:mb-9">{won?'Every colour. Every cell.':'Connect matching colours. Fill every cell.'}</p>
         <div className="board-glass relative w-full max-w-[590px] rounded-[30px] p-3 sm:p-4" ref={boardRef}>
           <div className={`board-inner relative aspect-square w-full overflow-hidden rounded-[20px] ${won?'board-won':''}`} style={{'--size':puzzle.size}} onPointerMove={event=>{if(pointerDown.current&&activeId!==null){const point=cellFromTarget(document.elementFromPoint(event.clientX,event.clientY));if(point)onCellEnter(point)}}}>
+            <GlassCanvas size={puzzle.size} activePath={activeGlassPath} />
             <div className="board-glow"/>
             <svg className="path-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">{pathPoints.map(({segment,path})=><g key={segment.id} className={activeId===segment.id?'active-path':''}><path className="path-halo" d={pathD(path)} stroke={segment.color}/><path className="path-line" d={pathD(path)} stroke={segment.color}/></g>)}</svg>
             <div className="cell-grid" style={{gridTemplateColumns:`repeat(${puzzle.size},minmax(0,1fr))`}}>{grid.map(point=>{
