@@ -221,11 +221,19 @@ function App() {
     return p.length ? [{ segment: s, path: p }] : [];
   });
 
-  const pathD = (path) => path.map((p, i) => {
-    const x = (p.c + 0.5) * 100 / puzzle.size;
-    const y = (p.r + 0.5) * 100 / puzzle.size;
-    return `${i ? 'L' : 'M'} ${x} ${y}`;
-  }).join(' ');
+  const pathD = (path) => {
+    const points = path.map(p => ({ x: (p.c + 0.5) * 100 / puzzle.size, y: (p.r + 0.5) * 100 / puzzle.size }));
+    if (points.length < 3) return points.map((p, i) => `${i ? 'L' : 'M'} ${p.x} ${p.y}`).join(' ');
+    let d = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 1; i < points.length - 1; i++) {
+      const prev = points[i - 1], point = points[i], next = points[i + 1];
+      const before = { x: point.x + (prev.x - point.x) * 0.18, y: point.y + (prev.y - point.y) * 0.18 };
+      const after = { x: point.x + (next.x - point.x) * 0.18, y: point.y + (next.y - point.y) * 0.18 };
+      d += ` L ${before.x} ${before.y} Q ${point.x} ${point.y} ${after.x} ${after.y}`;
+    }
+    const last = points.at(-1);
+    return d + ` L ${last.x} ${last.y}`;
+  };
 
   return (
     <main className="min-h-screen relative overflow-hidden text-white selection:bg-cyan-200/30">
