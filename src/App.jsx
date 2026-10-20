@@ -12,12 +12,25 @@ const same = (a, b) => a && b && a.r === b.r && a.c === b.c;
 
 function App() {
   const initial = useMemo(() => readSave(), []);
-  const [level, setLevel] = useState(Math.max(1, initial.level || 1));
+  const challengeParams = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('challenge')) return null;
+    const seed = Number(params.get('challenge'));
+    const challengeLevel = Number(params.get('level'));
+    const size = Number(params.get('size'));
+    const pairs = Number(params.get('pairs'));
+    if (!Number.isFinite(seed) || !Number.isFinite(challengeLevel) || challengeLevel < 1 || challengeLevel > 10000 || !Number.isInteger(size) || size < 5 || size > 8 || !Number.isInteger(pairs) || pairs < 3 || pairs > 8) return null;
+    return { seed: seed >>> 0, level: Math.floor(challengeLevel), size, pairs };
+  }, []);
+  const [level, setLevel] = useState(Math.max(1, challengeParams?.level || initial.level || 1));
   const [best, setBest] = useState(initial.best || 1);
   const [sound, setSound] = useState(initial.sound !== false);
   const [adaptive, setAdaptive] = useState(() => ({ rating: Math.max(0, Math.min(100, initial.adaptive?.rating ?? 50)), samples: initial.adaptive?.samples ?? 0, feedbackBias: initial.adaptive?.feedbackBias ?? 0, arms: initial.adaptive?.arms ?? {}, uncertainty: initial.adaptive?.uncertainty ?? ratingUncertainty(initial.adaptive?.samples ?? 0) }));
   const [difficultyMode, setDifficultyMode] = useState(initial.difficultyMode || 'adaptive');
-  const [puzzle, setPuzzle] = useState(() => generateAdaptivePuzzle(Math.max(1, initial.level || 1), initial.adaptive || {}, null, initial.difficultyMode || 'adaptive', choosePuzzleVariant(initial.adaptive || {})));
+  const [reminderEnabled, setReminderEnabled] = useState(initial.reminderEnabled === true);
+  const [puzzle, setPuzzle] = useState(() => challengeParams
+    ? generatePuzzle(challengeParams.level, challengeParams.seed, { size: challengeParams.size, pairCount: challengeParams.pairs })
+    : generateAdaptivePuzzle(Math.max(1, initial.level || 1), initial.adaptive || {}, null, initial.difficultyMode || 'adaptive', choosePuzzleVariant(initial.adaptive || {})));
   const [paths, setPaths] = useState({});
   const [activeId, setActiveId] = useState(null);
   const [won, setWon] = useState(false);
@@ -48,8 +61,8 @@ function App() {
   const stats = analyticsSummary(analytics);
 
   useEffect(() => {
-    localStorage.setItem(STORE, JSON.stringify({ level, best, sound, adaptive, difficultyMode }));
-  }, [level, best, sound, adaptive, difficultyMode]);
+    localStorage.setItem(STORE, JSON.stringify({ level, best, sound, adaptive, difficultyMode, reminderEnabled }));
+  }, [level, best, sound, adaptive, difficultyMode, reminderEnabled]);
 
   useEffect(() => {
     try { localStorage.setItem('flow-analytics-v1', JSON.stringify(analytics)); } catch { /* Analytics are optional; the game still works without storage. */ }
@@ -59,7 +72,13 @@ function App() {
     if (sessionRecorded.current) return;
     sessionRecorded.current = true;
     recordEvent('session_start');
-    recordEvent('puzzle_start', { level, mode: difficultyMode, variant: puzzle.difficulty?.variant });
+    recordEvent('puzzle_start', { level, mode: challengeParams ? 'shared' : difficultyMode, variant: puzzle.difficulty?.variant });
+    try {
+      const now = Date.now();
+      const lastOpen = Number(localStorage.getItem('flow-last-open') || 0);
+      if (reminderEnabled && lastOpen && now - lastOpen >= 24 * 60 * 60 * 1000) notify('Your optional FLOW reminder: a fresh puzzle is waiting.');
+      localStorage.setItem('flow-last-open', String(now));
+    } catch { /* Reminders are optional and never block play. */ }
   }, []);
 
   useEffect(() => {
@@ -132,6 +151,11 @@ function App() {
   };
 
   const installLevel = (nextLevel, isDaily = false) => {
+    if (window.location.search.includes('challenge=')) {
+      const params = new URLSearchParams(window.location.search);
+      ['challenge', 'level', 'size', 'pairs'].forEach(key => params.delete(key));
+      window.history.replaceState({}, '', window.location.pathname + (params.toString() ? `?${params.toString()}` : '') + window.location.hash);
+    }
     if (!won && !puzzleResultRecorded.current && sessionRecorded.current) recordEvent('puzzle_abandon', { level, mode: difficultyMode });
     const localDate = new Date();
     const daySeed = Number(`${localDate.getFullYear()}${String(localDate.getMonth() + 1).padStart(2, '0')}${String(localDate.getDate()).padStart(2, '0')}`);
@@ -288,6 +312,22 @@ function App() {
     beep(680, 0.1);
   };
 
+  const shareChallenge = async () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('challenge', String(puzzle.seed ?? 0));
+    url.searchParams.set('level', String(level));
+    url.searchParams.set('size', String(puzzle.size));
+    url.searchParams.set('pairs', String(puzzle.segments.length));
+    try {
+      if (navigator.share) await navigator.share({ title: 'FLOW puzzle challenge', text: 'Can you solve this FLOW puzzle?', url: url.toString() });
+      else if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(url.toString()); notify('Challenge link copied'); }
+      else window.prompt('Copy this FLOW challenge link', url.toString());
+    } catch (error) {
+      if (error?.name !== 'AbortError') notify('Could not share right now');
+    }
+    setShowMenu(false);
+  };
+
   const giveFeedback = (rating) => {
     if (feedback) return;
     setFeedback(rating);
@@ -361,7 +401,7 @@ function App() {
         <p className="mt-2 text-[10px] tracking-wide text-white/25">Difficulty adapts to your pace.</p>
       </section>
       <footer className="relative z-10 mx-auto flex w-full max-w-5xl items-center justify-between px-5 pb-5 text-[10px] tracking-wide text-white/25 sm:px-8"><span>FLOW</span><span>{Math.max(0,best-1)} completed</span></footer>
-      {showMenu&&<div className="menu-backdrop" onClick={()=>setShowMenu(false)}><div className="menu-glass" onClick={ev=>ev.stopPropagation()}><button onClick={()=>installLevel(1)}>Restart from level one</button><button onClick={()=>installLevel(level,true)}>Daily puzzle</button><button onClick={()=>{setShowStats(true);setShowMenu(false)}}>Player stats</button><button onClick={()=>{const modes=['adaptive','relaxed','standard','challenging'];const next=modes[(modes.indexOf(difficultyMode)+1)%modes.length];setDifficultyMode(next);setShowMenu(false);notify('Difficulty: '+next)}}>Difficulty: {difficultyMode}</button><button onClick={()=>{setSound(v=>!v);setShowMenu(false)}}>{sound?'Sound off':'Sound on'}</button><p>All stats stay on this device. FLOW works offline after its first load.</p></div></div>}
+      {showMenu&&<div className="menu-backdrop" onClick={()=>setShowMenu(false)}><div className="menu-glass" onClick={ev=>ev.stopPropagation()}><button onClick={()=>installLevel(1)}>Restart from level one</button><button onClick={()=>installLevel(level,true)}>Daily puzzle</button><button onClick={()=>{setShowStats(true);setShowMenu(false)}}>Player stats</button><button onClick={shareChallenge}>Share this puzzle</button><button onClick={()=>{const modes=['adaptive','relaxed','standard','challenging'];const next=modes[(modes.indexOf(difficultyMode)+1)%modes.length];setDifficultyMode(next);setShowMenu(false);notify('Difficulty: '+next)}}>Difficulty: {difficultyMode}</button><button onClick={()=>{setReminderEnabled(v=>!v);setShowMenu(false);notify('In-app return reminder '+(!reminderEnabled?'on':'off'))}}>Return reminder: {reminderEnabled?'on':'off'}</button><button onClick={()=>{setSound(v=>!v);setShowMenu(false)}}>{sound?'Sound off':'Sound on'}</button><p>Stats stay on this device. Reminders are in-app only. FLOW works offline after its first load.</p></div></div>}
       {showStats&&<div className="stats-backdrop" onClick={()=>setShowStats(false)}><section className="stats-panel" role="dialog" aria-modal="true" aria-label="Player stats" onClick={ev=>ev.stopPropagation()}><div className="stats-heading"><div><span className="stats-eyebrow">YOUR FLOW</span><h2>Player stats</h2></div><button onClick={()=>setShowStats(false)} aria-label="Close stats">×</button></div><div className="stats-rating"><span>Adaptive rating</span><strong>{adaptive.rating}<small>/100</small></strong><p>Estimated challenge fit · uncertainty ±{adaptive.uncertainty ?? ratingUncertainty(adaptive.samples)}</p></div><div className="stats-grid"><div><strong>{stats.completions}</strong><span>Puzzles solved</span></div><div><strong>{stats.averageSolveSeconds ? Math.floor(stats.averageSolveSeconds/60)+'m '+stats.averageSolveSeconds%60+'s' : '—'}</strong><span>Average solve</span></div><div><strong>{stats.returnDays}</strong><span>Days played</span></div><div><strong>{stats.abandonments}</strong><span>Unfinished</span></div><div><strong>{stats.hintsPerPuzzle}</strong><span>Hints per solve</span></div><div><strong>{stats.resetsPerPuzzle}</strong><span>Resets per solve</span></div></div><div className="stats-section"><h3>Difficulty feedback</h3><p>Too easy: {stats.feedback.easy} · Just right: {stats.feedback.balanced} · Too hard: {stats.feedback.hard}</p><p className="stats-note">Your analytics are stored locally in this browser. No account or network connection is needed.</p></div><button className="stats-close" onClick={()=>setShowStats(false)}>Back to puzzle</button></section></div>}
       {toast&&<div className="toast" role="status">{toast}</div>}
     </main>
