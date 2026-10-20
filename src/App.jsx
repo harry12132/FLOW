@@ -24,6 +24,7 @@ function App() {
   const [moves, setMoves] = useState(0);
   const boardRef = useRef(null);
   const pointerDown = useRef(false);
+  const lastPointerCell = useRef(null);
   const audioRef = useRef(null);
 
   const occupied = useMemo(() => getOccupied(paths, activeId), [paths, activeId]);
@@ -114,6 +115,7 @@ function App() {
     setPaths(prev => ({ ...prev, [segment.id]: [seed] }));
     setActiveId(segment.id);
     pointerDown.current = true;
+    lastPointerCell.current = cellId(seed);
     setHintCell(null);
     beep(420, 0.04);
   };
@@ -183,6 +185,9 @@ function App() {
 
   const onCellEnter = (point) => {
     if (!pointerDown.current || activeId === null) return;
+    const id = cellId(point);
+    if (lastPointerCell.current === id) return;
+    lastPointerCell.current = id;
     extendPath(activeId, point);
   };
 
@@ -267,7 +272,7 @@ function App() {
           </div>
 
           <div className={`board-frame ${won ? 'is-won' : ''}`} ref={boardRef}>
-            <div className="board-inner" style={{ '--size': puzzle.size }}>
+            <div className="board-inner" style={{ '--size': puzzle.size }} onPointerMove={event => { if (pointerDown.current && activeId !== null) { const point = cellFromTarget(document.elementFromPoint(event.clientX, event.clientY)); if (point) onCellEnter(point); } }}>
               <svg className="path-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Puzzle paths">
                 {pathPoints.map(({ segment, path }) => <g key={segment.id}>
                   <path className="path-shadow" d={pathD(path)} stroke={segment.color} />
@@ -286,8 +291,6 @@ function App() {
                     data-cell={cellId(point)}
                     className={`cell ${endpoint ? 'endpoint-cell' : ''} ${owner ? 'has-path' : ''} ${isHint ? 'hint-cell' : ''} ${isPathEnd ? 'path-end' : ''}`}
                     onPointerDown={e => onCellPointerDown(e, point)}
-                    onPointerEnter={() => onCellEnter(point)}
-                    onPointerMove={e => { if (e.buttons === 1) onCellEnter(point); }}
                     style={{ '--path-color': color || 'transparent', borderRight: point.c === puzzle.size - 1 ? 0 : undefined, borderBottom: point.r === puzzle.size - 1 ? 0 : undefined }}
                   >
                     {endpoint && <span className="endpoint-dot" style={{ '--dot-color': endpoint.color }}><span /></span>}
