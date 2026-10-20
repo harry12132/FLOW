@@ -1,0 +1,26 @@
+name: FLOW checks
+
+on:
+  push:
+    branches:
+      - feat/adaptive-gameplay-offline
+  pull_request:
+    branches:
+      - redesign/liquid-glass-flow
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install
+      - name: Run adaptive gameplay tests
+        run: npm test
+      - name: Build production app
+        run: npm run build

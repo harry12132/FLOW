@@ -1,0 +1,19 @@
+{
+  "name": "FLOW — Connect Every Colour",
+  "short_name": "FLOW",
+  "description": "A little space to think. Connect every colour.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#080d19",
+  "theme_color": "#080d19",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/flow-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

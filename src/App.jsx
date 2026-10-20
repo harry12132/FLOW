@@ -1,5 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { cellId, createEmptyPaths, generatePuzzle, getOccupied, isAdjacent, puzzleComplete } from './game.js';
+import LiquidGlass from 'liquid-glass-react';
+import GlassCanvas from './GlassCanvas.jsx';
+import { cellId, createEmptyPaths, generatePuzzle, generateAdaptivePuzzle, getOccupied, isAdjacent, puzzleComplete, scorePuzzlePerformance, updateAdaptiveRating } from './game.js';
+import { appendAnalyticsEvent, analyticsSummary, choosePuzzleVariant, readAnalytics, ratingUncertainty, recordVariantReward } from './analytics.js';
 
 const STORE = 'flow-save-v1';
 const readSave = () => {
@@ -12,7 +15,9 @@ function App() {
   const [level, setLevel] = useState(Math.max(1, initial.level || 1));
   const [best, setBest] = useState(initial.best || 1);
   const [sound, setSound] = useState(initial.sound !== false);
-  const [puzzle, setPuzzle] = useState(() => generatePuzzle(Math.max(1, initial.level || 1)));
+  const [adaptive, setAdaptive] = useState(() => ({ rating: Math.max(0, Math.min(100, initial.adaptive?.rating ?? 50)), samples: initial.adaptive?.samples ?? 0, feedbackBias: initial.adaptive?.feedbackBias ?? 0, arms: initial.adaptive?.arms ?? {}, uncertainty: initial.adaptive?.uncertainty ?? ratingUncertainty(initial.adaptive?.samples ?? 0) }));
+  const [difficultyMode, setDifficultyMode] = useState(initial.difficultyMode || 'adaptive');
+  const [puzzle, setPuzzle] = useState(() => generateAdaptivePuzzle(Math.max(1, initial.level || 1), initial.adaptive || {}, null, initial.difficultyMode || 'adaptive', choosePuzzleVariant(initial.adaptive || {})));
   const [paths, setPaths] = useState({});
   const [activeId, setActiveId] = useState(null);
   const [won, setWon] = useState(false);
@@ -21,30 +26,83 @@ function App() {
   const [showMenu, setShowMenu] = useState(false);
   const [toast, setToast] = useState('');
   const [daily, setDaily] = useState(false);
-  const [moves, setMoves] = useState(0);
+  const [showStats, setShowStats] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+  const [analytics, setAnalytics] = useState(() => readAnalytics());
+  const sessionRecorded = useRef(false);
   const boardRef = useRef(null);
   const pointerDown = useRef(false);
   const lastPointerCell = useRef(null);
   const audioRef = useRef(null);
+  const activeElapsedMs = useRef(0);
+  const activeSince = useRef(typeof document !== 'undefined' && document.visibilityState === 'hidden' ? null : Date.now());
+  const puzzleMetrics = useRef({ hints: 0, resets: 0, backtracks: 0 });
+  const puzzleResultRecorded = useRef(false);
 
   const occupied = useMemo(() => getOccupied(paths, activeId), [paths, activeId]);
   const filled = useMemo(() => Object.values(paths).reduce((n, p) => n + p.length, 0), [paths]);
   const total = puzzle.size * puzzle.size;
   const progress = Math.round((filled / total) * 100);
 
-  useEffect(() => {
-    localStorage.setItem(STORE, JSON.stringify({ level, best, sound }));
-  }, [level, best, sound]);
+  const recordEvent = (type, detail = {}) => setAnalytics(previous => appendAnalyticsEvent(previous, type, detail));
+  const stats = analyticsSummary(analytics);
 
   useEffect(() => {
-    const stop = () => { pointerDown.current = false; setActiveId(null); };
+    localStorage.setItem(STORE, JSON.stringify({ level, best, sound, adaptive, difficultyMode }));
+  }, [level, best, sound, adaptive, difficultyMode]);
+
+  useEffect(() => {
+    try { localStorage.setItem('flow-analytics-v1', JSON.stringify(analytics)); } catch { /* Analytics are optional; the game still works without storage. */ }
+  }, [analytics]);
+
+  useEffect(() => {
+    if (sessionRecorded.current) return;
+    sessionRecorded.current = true;
+    recordEvent('session_start');
+    recordEvent('puzzle_start', { level, mode: difficultyMode, variant: puzzle.difficulty?.variant });
+  }, []);
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.hidden && activeSince.current !== null) {
+        activeElapsedMs.current += Date.now() - activeSince.current;
+        activeSince.current = null;
+      } else if (!document.hidden && activeSince.current === null) {
+        activeSince.current = Date.now();
+      }
+    };
+    const onPageHide = () => {
+      if (puzzleResultRecorded.current) return;
+      try {
+        const current = readAnalytics();
+        const next = appendAnalyticsEvent(current, 'puzzle_abandon', { level, mode: difficultyMode, reason: 'pagehide' });
+        localStorage.setItem('flow-analytics-v1', JSON.stringify(next));
+      } catch { /* The puzzle remains playable if browser storage is unavailable. */ }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', onPageHide);
+    };
+  }, [level, difficultyMode]);
+
+  useEffect(() => {
+    const stop = () => {
+      if (pointerDown.current && activeId !== null) {
+        setPaths(prev => ({ ...prev, [activeId]: [] }));
+      }
+      pointerDown.current = false;
+      lastPointerCell.current = null;
+      setActiveId(null);
+    };
     window.addEventListener('pointerup', stop);
     window.addEventListener('pointercancel', stop);
     return () => {
       window.removeEventListener('pointerup', stop);
       window.removeEventListener('pointercancel', stop);
     };
-  }, []);
+  }, [activeId]);
 
   const beep = useCallback((frequency = 520, duration = 0.06) => {
     if (!sound) return;
@@ -56,10 +114,10 @@ function App() {
       if (ctx.state === 'suspended') ctx.resume();
       const oscillator = ctx.createOscillator();
       const gain = ctx.createGain();
-      oscillator.type = 'sine';
+      oscillator.type = 'triangle';
       oscillator.frequency.value = frequency;
       gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.07, ctx.currentTime + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.025, ctx.currentTime + 0.012);
       gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
       oscillator.connect(gain);
       gain.connect(ctx.destination);
@@ -74,25 +132,34 @@ function App() {
   };
 
   const installLevel = (nextLevel, isDaily = false) => {
-    const daySeed = Number(new Date().toISOString().slice(0, 10).replaceAll('-', ''));
-    const next = generatePuzzle(nextLevel, isDaily ? daySeed : null);
+    if (!won && !puzzleResultRecorded.current && sessionRecorded.current) recordEvent('puzzle_abandon', { level, mode: difficultyMode });
+    const localDate = new Date();
+    const daySeed = Number(`${localDate.getFullYear()}${String(localDate.getMonth() + 1).padStart(2, '0')}${String(localDate.getDate()).padStart(2, '0')}`);
+    const variant = choosePuzzleVariant(adaptive);
+    const next = isDaily ? generatePuzzle(nextLevel, daySeed) : generateAdaptivePuzzle(nextLevel, adaptive, null, difficultyMode, variant);
+    puzzleStartedAt.current = Date.now();
+    activeElapsedMs.current = 0;
+    activeSince.current = typeof document !== 'undefined' && document.visibilityState === 'hidden' ? null : Date.now();
+    puzzleMetrics.current = { hints: 0, resets: 0, backtracks: 0 };
+    puzzleResultRecorded.current = false;
     setLevel(nextLevel);
     setPuzzle(next);
     setPaths(createEmptyPaths(next));
     setActiveId(null);
     setWon(false);
     setHintCell(null);
-    setMoves(0);
+    setFeedback(null);
     setDaily(isDaily);
+    recordEvent('puzzle_start', { level: nextLevel, mode: isDaily ? 'daily' : difficultyMode, variant: next.difficulty?.variant, difficulty: next.difficulty?.score });
     setShowMenu(false);
   };
 
   const reset = () => {
+    puzzleMetrics.current.resets += 1;
     setPaths(createEmptyPaths(puzzle));
     setActiveId(null);
     setWon(false);
     setHintCell(null);
-    setMoves(0);
     beep(300, 0.07);
   };
 
@@ -128,6 +195,7 @@ function App() {
     const last = current.at(-1);
     if (same(point, last)) {
       if (current.length > 1 && same(point, current[current.length - 2])) {
+        puzzleMetrics.current.backtracks += 1;
         setPaths(prev => ({ ...prev, [segmentId]: current.slice(0, -1) }));
         beep(310, 0.025);
       }
@@ -146,7 +214,6 @@ function App() {
     if (same(point, segment.end) || same(point, segment.start)) {
       pointerDown.current = false;
       setActiveId(null);
-      setMoves(m => m + 1);
       const canonicalPath = same(point, segment.start) ? [...next].reverse() : next;
       setPaths(prev => {
         const completed = { ...prev, [segmentId]: canonicalPath };
@@ -154,6 +221,19 @@ function App() {
         if (done) {
           setWon(true);
           setBest(b => Math.max(b, level + 1));
+          if (!puzzleResultRecorded.current) {
+            puzzleResultRecorded.current = true;
+            const elapsedSeconds = Math.max(0, (activeElapsedMs.current + (activeSince.current === null ? 0 : Date.now() - activeSince.current)) / 1000);
+            recordEvent('puzzle_complete', { level, elapsedSeconds: Math.round(elapsedSeconds), hints: puzzleMetrics.current.hints, resets: puzzleMetrics.current.resets, backtracks: puzzleMetrics.current.backtracks, difficulty: puzzle.difficulty?.score, variant: puzzle.difficulty?.variant, daily });
+            if (!daily) {
+              const score = scorePuzzlePerformance({ puzzle, elapsedSeconds, ...puzzleMetrics.current });
+              setAdaptive(previous => {
+                const samples = previous.samples + 1;
+                return { ...previous, rating: updateAdaptiveRating(previous.rating, score, previous.samples), samples, uncertainty: ratingUncertainty(samples) };
+              });
+              setAdaptive(previous => recordVariantReward(previous, puzzle.difficulty?.variant || 'balanced', 0.6));
+            }
+          }
           beep(760, 0.18);
         }
         return completed;
@@ -174,6 +254,7 @@ function App() {
       const id = Number(owner[0]);
       const path = owner[1];
       if (path.length && !same(point, path[0]) && !same(point, path.at(-1))) {
+        puzzleMetrics.current.backtracks += Math.max(1, path.length - path.findIndex(p => same(p, point)) - 1);
         setPaths(prev => ({ ...prev, [id]: path.slice(0, path.findIndex(p => same(p, point)) + 1) }));
         setActiveId(id);
         pointerDown.current = true;
@@ -200,10 +281,23 @@ function App() {
     if (!segment) return;
     const current = paths[segment.id] || [];
     const nextPoint = segment.solution.find((p, i) => i >= current.length && !current.some(q => same(p, q)));
+    puzzleMetrics.current.hints += 1;
     setHintCell(nextPoint || segment.solution[Math.min(current.length, segment.solution.length - 1)]);
     setHints(h => h - 1);
     notify('A little nudge');
     beep(680, 0.1);
+  };
+
+  const giveFeedback = (rating) => {
+    if (feedback) return;
+    setFeedback(rating);
+    recordEvent('feedback', { rating, level, variant: puzzle.difficulty?.variant, difficulty: puzzle.difficulty?.score });
+    const reward = rating === 'balanced' ? 1 : rating === 'easy' ? 0.55 : 0.15;
+    setAdaptive(previous => ({
+      ...recordVariantReward(previous, puzzle.difficulty?.variant || 'balanced', reward),
+      feedbackBias: Math.max(-12, Math.min(12, (previous.feedbackBias || 0) + (rating === 'easy' ? 3 : rating === 'hard' ? -4 : 0))),
+    }));
+    notify(rating === 'balanced' ? 'Got it. More like this.' : rating === 'easy' ? 'Got it. I’ll raise the challenge.' : 'Got it. I’ll ease the challenge.');
   };
 
   const pathFor = (segment) => paths[segment.id] || [];
@@ -218,103 +312,58 @@ function App() {
     const p = pathFor(s);
     return p.length ? [{ segment: s, path: p }] : [];
   });
+  const activeGlassPath = activeId === null ? [] : (paths[activeId] || []);
 
-  const pathD = (path) => path.map((p, i) => {
-    const x = (p.c + 0.5) * 100 / puzzle.size;
-    const y = (p.r + 0.5) * 100 / puzzle.size;
-    return `${i ? 'L' : 'M'} ${x} ${y}`;
-  }).join(' ');
+  const pathD = (path) => {
+    const points = path.map(p => ({ x: (p.c + 0.5) * 100 / puzzle.size, y: (p.r + 0.5) * 100 / puzzle.size }));
+    if (points.length < 3) return points.map((p, i) => `${i ? 'L' : 'M'} ${p.x} ${p.y}`).join(' ');
+    let d = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 1; i < points.length - 1; i++) {
+      const prev = points[i - 1], point = points[i], next = points[i + 1];
+      const before = { x: point.x + (prev.x - point.x) * 0.18, y: point.y + (prev.y - point.y) * 0.18 };
+      const after = { x: point.x + (next.x - point.x) * 0.18, y: point.y + (next.y - point.y) * 0.18 };
+      d += ` L ${before.x} ${before.y} Q ${point.x} ${point.y} ${after.x} ${after.y}`;
+    }
+    const last = points.at(-1);
+    return d + ` L ${last.x} ${last.y}`;
+  };
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <a className="wordmark" href="#" onClick={(e) => { e.preventDefault(); installLevel(1); }}>
-          <span className="logo-mark"><i /><i /><i /><i /></span>
-          <span>flow<span className="wordmark-period">.</span></span>
-        </a>
-        <div className="top-actions">
-          <button className="icon-button sound-button" onClick={() => setSound(v => !v)} aria-label={sound ? 'Turn sound off' : 'Turn sound on'} title={sound ? 'Sound on' : 'Sound off'}>
-            {sound ? <svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg> : <svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="m16 9 5 6m0-6-5 6"/></svg>}
-          </button>
-          <button className="avatar-button" onClick={() => setShowMenu(v => !v)} aria-label="Open game menu">H</button>
-        </div>
+    <main className="min-h-screen relative overflow-hidden text-white selection:bg-cyan-200/30">
+      <div className="ambient ambient-one"/><div className="ambient ambient-two"/><div className="ambient ambient-three"/>
+      <header className="relative z-10 mx-auto flex w-full max-w-5xl items-center justify-between px-5 py-5 sm:px-8">
+        <button className="brand flex items-center gap-3" onClick={()=>installLevel(1)} aria-label="FLOW home"><span className="brand-symbol"><i/><i/><i/><i/></span><span className="text-[21px] font-semibold tracking-[-0.08em]">flow<span className="text-cyan-200">.</span></span></button>
+        <LiquidGlass displacementScale={34} blurAmount={0.08} saturation={145} aberrationIntensity={1.2} elasticity={0.18} cornerRadius={19} padding="5px" className="liquid-controls"><div className="flex items-center gap-1.5">
+          <button className="glass-icon" onClick={()=>setSound(v=>!v)} aria-label={sound?'Mute sound':'Enable sound'}><svg viewBox="0 0 24 24">{sound?<><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></>:<><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="m16 9 5 6m0-6-5 6"/></>}</svg></button>
+          <button className="glass-icon" onClick={reset} aria-label="Restart puzzle"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5"/></svg></button>
+          <button className="glass-icon" onClick={()=>setShowMenu(v=>!v)} aria-label="Game options"><span className="dots">···</span></button>
+        </div></LiquidGlass>
       </header>
-
-      <section className="game-layout">
-        <aside className="side-panel">
-          <div className="eyebrow"><span className="live-dot" /> YOUR DAILY PAUSE</div>
-          <h1>A little<br />space to <em>think.</em></h1>
-          <p className="intro">Connect the colours. Fill the board. Find your flow.</p>
-          <div className="level-card">
-            <div className="level-label">{daily ? 'DAILY CHALLENGE' : 'CURRENT LEVEL'}</div>
-            <div className="level-number">{daily ? 'TODAY' : String(level).padStart(3, '0')}</div>
-            <div className="level-meta"><span>{puzzle.size} × {puzzle.size} grid</span><span className="meta-separator">·</span><span>{puzzle.segments.length} colours</span></div>
-            <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
-            <div className="progress-caption"><span>{filled} of {total} cells</span><span>{progress}%</span></div>
+      <section className="relative z-10 mx-auto flex w-full max-w-5xl flex-col items-center px-4 pb-10 pt-5 sm:px-8 sm:pt-8">
+        <div className="mb-5 flex items-center gap-3"><span className="level-pill">{daily?'DAILY':`LEVEL ${String(level).padStart(3,'0')}`}</span><span className="text-sm text-white/45">{puzzle.size} × {puzzle.size}</span></div>
+        <h1 className="mb-2 text-center text-4xl font-medium tracking-[-0.075em] sm:text-5xl">{won?'Perfectly connected.':'Find your flow.'}</h1>
+        <p className="mb-7 text-center text-sm text-white/45 sm:mb-9">{won?'Every colour. Every cell.':'Connect each pair. Every square should belong to a path.'}</p>
+        <div className="board-glass relative w-full max-w-[590px] rounded-[30px] p-3 sm:p-4" ref={boardRef}>
+          <div className={`board-inner relative aspect-square w-full overflow-hidden rounded-[20px] ${won?'board-won':''}`} style={{'--size':puzzle.size}} onPointerMove={event=>{if(pointerDown.current&&activeId!==null){const point=cellFromTarget(document.elementFromPoint(event.clientX,event.clientY));if(point)onCellEnter(point)}}}>
+            <GlassCanvas size={puzzle.size} activePath={activeGlassPath} />
+            <div className="board-glow"/>
+            <svg className="path-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">{pathPoints.map(({segment,path})=><g key={segment.id} className={activeId===segment.id?'active-path':''}><path className="path-halo" d={pathD(path)} stroke={segment.color}/><path className="path-line" d={pathD(path)} stroke={segment.color}/></g>)}</svg>
+            <div className="cell-grid" style={{gridTemplateColumns:`repeat(${puzzle.size},minmax(0,1fr))`}}>{grid.map(point=>{
+              const endpoint=isEndpoint(point),owner=Object.entries(paths).find(([,path])=>path.some(p=>same(p,point)));
+              const color=endpoint?.color||(owner?puzzle.segments.find(s=>s.id===Number(owner[0]))?.color:null),isHint=same(point,hintCell),isPathEnd=owner&&paths[Number(owner[0])]?.at(-1)&&same(paths[Number(owner[0])].at(-1),point);
+              return <div key={cellId(point)} data-cell={cellId(point)} className={`cell ${endpoint?'endpoint-cell':''} ${owner?'has-path':''} ${isHint?'hint-cell':''} ${isPathEnd?'path-end':''}`} onPointerDown={ev=>onCellPointerDown(ev,point)} style={{'--path-color':color||'transparent',borderRight:point.c===puzzle.size-1?0:undefined,borderBottom:point.r===puzzle.size-1?0:undefined}}>{endpoint&&<span className="endpoint-dot" style={{'--dot-color':endpoint.color}}><span/></span>}{isHint&&<span className="hint-pulse"/>}</div>
+            })}</div>
           </div>
-          <div className="stats-row">
-            <div className="stat"><span className="stat-value">{Math.max(0, best - 1)}</span><span className="stat-label">BEST LEVEL</span></div>
-            <div className="stat-divider" />
-            <div className="stat"><span className="stat-value">{solvedCount}<span className="stat-total">/{puzzle.segments.length}</span></span><span className="stat-label">PATHS FOUND</span></div>
-          </div>
-          <div className="controls">
-            <button className="primary-button" onClick={reset}><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5"/></svg>Start over</button>
-            <button className="secondary-button" onClick={useHint}><svg viewBox="0 0 24 24"><path d="M9 18h6m-5 3h4m-2-19a7 7 0 0 0-4 12.7c.6.4 1 1.1 1 1.8h6c0-.7.4-1.4 1-1.8A7 7 0 0 0 12 2Z"/></svg>Hint <span className="hint-count">{hints}</span></button>
-          </div>
-          <button className="daily-link" onClick={() => installLevel(level, true)}><span className="calendar-icon">✳</span><span><strong>Daily challenge</strong><small>A fresh board, every day</small></span><span className="arrow">↗</span></button>
-          <p className="quiet-note">No timer. No pressure.<br />Just you and the puzzle.</p>
-        </aside>
-
-        <section className="board-column">
-          <div className="board-heading">
-            <div><span className="board-kicker">PUZZLE {daily ? 'OF THE DAY' : String(level).padStart(3, '0')}</span><h2>{won ? 'Beautifully done.' : 'Find the connections.'}</h2></div>
-            <div className="board-tools"><span className="difficulty"><i />{level < 8 ? 'Warming up' : level < 25 ? 'Getting tricky' : level < 55 ? 'Brain at work' : 'Deep focus'}</span><button className="tiny-button" onClick={() => { setShowMenu(v => !v); }} aria-label="More options">•••</button></div>
-          </div>
-
-          <div className={`board-frame ${won ? 'is-won' : ''}`} ref={boardRef}>
-            <div className="board-inner" style={{ '--size': puzzle.size }} onPointerMove={event => { if (pointerDown.current && activeId !== null) { const point = cellFromTarget(document.elementFromPoint(event.clientX, event.clientY)); if (point) onCellEnter(point); } }}>
-              <svg className="path-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Puzzle paths">
-                {pathPoints.map(({ segment, path }) => <g key={segment.id}>
-                  <path className="path-shadow" d={pathD(path)} stroke={segment.color} />
-                  <path className="path-line" d={pathD(path)} stroke={segment.color} />
-                </g>)}
-              </svg>
-              <div className="cell-grid" style={{ gridTemplateColumns: `repeat(${puzzle.size}, minmax(0, 1fr))` }}>
-                {grid.map(point => {
-                  const endpoint = isEndpoint(point);
-                  const owner = Object.entries(paths).find(([, path]) => path.some(p => same(p, point)));
-                  const color = endpoint?.color || (owner ? puzzle.segments.find(s => s.id === Number(owner[0]))?.color : null);
-                  const isHint = same(point, hintCell);
-                  const isPathEnd = owner && paths[Number(owner[0])]?.at(-1) && same(paths[Number(owner[0])].at(-1), point);
-                  return <div
-                    key={cellId(point)}
-                    data-cell={cellId(point)}
-                    className={`cell ${endpoint ? 'endpoint-cell' : ''} ${owner ? 'has-path' : ''} ${isHint ? 'hint-cell' : ''} ${isPathEnd ? 'path-end' : ''}`}
-                    onPointerDown={e => onCellPointerDown(e, point)}
-                    style={{ '--path-color': color || 'transparent', borderRight: point.c === puzzle.size - 1 ? 0 : undefined, borderBottom: point.r === puzzle.size - 1 ? 0 : undefined }}
-                  >
-                    {endpoint && <span className="endpoint-dot" style={{ '--dot-color': endpoint.color }}><span /></span>}
-                    {isHint && <span className="hint-pulse" />}
-                  </div>;
-                })}
-              </div>
-            </div>
-            {won && <div className="win-confetti" aria-hidden="true">{Array.from({ length: 18 }, (_, i) => <i key={i} style={{ '--i': i }} />)}</div>}
-            {won && <div className="win-card"><span className="win-spark">✳</span><h3>Every path, found.</h3><p>You made room for every colour.</p><button className="primary-button" onClick={() => installLevel(level + 1)}>Next level <span>→</span></button><button className="text-button" onClick={() => installLevel(level + 1)}>Keep the flow going</button></div>}
-          </div>
-
-          <div className="board-footer">
-            <div className="legend"><span className="legend-dot" />Drag from one dot to its match</div>
-            <div className="footer-right"><span>{moves} {moves === 1 ? 'path' : 'paths'} completed</span><span className="footer-sep">/</span><span>{puzzle.size * puzzle.size - filled} open cells</span></div>
-          </div>
-          <div className="mobile-controls"><button className="secondary-button" onClick={reset}>↺ Restart</button><button className="primary-button" onClick={useHint}>Hint · {hints}</button></div>
-        </section>
+          {won&&<div className="win-overlay"><div className="win-orb">✦</div><h2 className="mt-4 text-2xl font-medium tracking-tight sm:text-3xl">Beautiful.</h2><p className="mt-2 text-sm text-white/55">You found every connection.</p><div className="feedback-row"><span>How did that feel?</span><div><button className={feedback==='easy'?'selected':''} onClick={()=>giveFeedback('easy')}>Too easy</button><button className={feedback==='balanced'?'selected':''} onClick={()=>giveFeedback('balanced')}>Just right</button><button className={feedback==='hard'?'selected':''} onClick={()=>giveFeedback('hard')}>Too hard</button></div></div><button className="next-button mt-5" onClick={()=>installLevel(level+1)}>Next puzzle <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div>}
+        </div>
+        <div className="mt-5 flex w-full max-w-[590px] items-center justify-between gap-4 px-1"><div className="flex min-w-0 flex-1 items-center gap-3"><div className="progress-track flex-1"><span style={{width:`${progress}%`}}/></div><span className="w-10 text-right text-xs tabular-nums text-white/50">{progress}%</span></div><button className="hint-button" onClick={useHint} disabled={won}><svg viewBox="0 0 24 24"><path d="M9 18h6m-5 3h4m-2-19a7 7 0 0 0-4 12.7c.6.4 1 1.1 1 1.8h6c0-.7.4-1.4 1-1.8A7 7 0 0 0 12 2Z"/></svg><span>Hint</span><span className="hint-number">{hints}</span></button></div>
+        <div className="mt-4 flex items-center gap-2 text-[11px] tracking-wide text-white/30"><span className="status-dot"/>{solvedCount} of {puzzle.segments.length} paths connected</div>
+        <p className="mt-2 text-[10px] tracking-wide text-white/25">Difficulty adapts to your pace.</p>
       </section>
-
-      <footer className="bottom-bar"><span>MADE FOR THE IN-BETWEEN MOMENTS.</span><span>Take your time. <span className="footer-heart">♥</span></span><button onClick={() => notify('More puzzle modes are on the way.')}>ABOUT FLOW <span>↗</span></button></footer>
-
-      {showMenu && <div className="menu-backdrop" onClick={() => setShowMenu(false)}><div className="menu-popover" onClick={e => e.stopPropagation()}><div className="menu-title">Make yourself at home</div><button onClick={() => installLevel(1)}>↗ <span>Start from level one</span></button><button onClick={() => installLevel(level, true)}>✳ <span>Play today's challenge</span></button><button onClick={() => { setSound(v => !v); setShowMenu(false); }}>♫ <span>{sound ? 'Turn sound off' : 'Turn sound on'}</span></button><p>Your progress is saved on this device.</p></div></div>}
-      {toast && <div className="toast" role="status">{toast}</div>}
+      <footer className="relative z-10 mx-auto flex w-full max-w-5xl items-center justify-between px-5 pb-5 text-[10px] tracking-wide text-white/25 sm:px-8"><span>FLOW</span><span>{Math.max(0,best-1)} completed</span></footer>
+      {showMenu&&<div className="menu-backdrop" onClick={()=>setShowMenu(false)}><div className="menu-glass" onClick={ev=>ev.stopPropagation()}><button onClick={()=>installLevel(1)}>Restart from level one</button><button onClick={()=>installLevel(level,true)}>Daily puzzle</button><button onClick={()=>{setShowStats(true);setShowMenu(false)}}>Player stats</button><button onClick={()=>{const modes=['adaptive','relaxed','standard','challenging'];const next=modes[(modes.indexOf(difficultyMode)+1)%modes.length];setDifficultyMode(next);setShowMenu(false);notify('Difficulty: '+next)}}>Difficulty: {difficultyMode}</button><button onClick={()=>{setSound(v=>!v);setShowMenu(false)}}>{sound?'Sound off':'Sound on'}</button><p>All stats stay on this device. FLOW works offline after its first load.</p></div></div>}
+      {showStats&&<div className="stats-backdrop" onClick={()=>setShowStats(false)}><section className="stats-panel" role="dialog" aria-modal="true" aria-label="Player stats" onClick={ev=>ev.stopPropagation()}><div className="stats-heading"><div><span className="stats-eyebrow">YOUR FLOW</span><h2>Player stats</h2></div><button onClick={()=>setShowStats(false)} aria-label="Close stats">×</button></div><div className="stats-rating"><span>Adaptive rating</span><strong>{adaptive.rating}<small>/100</small></strong><p>Estimated challenge fit · uncertainty ±{adaptive.uncertainty ?? ratingUncertainty(adaptive.samples)}</p></div><div className="stats-grid"><div><strong>{stats.completions}</strong><span>Puzzles solved</span></div><div><strong>{stats.averageSolveSeconds ? Math.floor(stats.averageSolveSeconds/60)+'m '+stats.averageSolveSeconds%60+'s' : '—'}</strong><span>Average solve</span></div><div><strong>{stats.returnDays}</strong><span>Days played</span></div><div><strong>{stats.abandonments}</strong><span>Unfinished</span></div><div><strong>{stats.hintsPerPuzzle}</strong><span>Hints per solve</span></div><div><strong>{stats.resetsPerPuzzle}</strong><span>Resets per solve</span></div></div><div className="stats-section"><h3>Difficulty feedback</h3><p>Too easy: {stats.feedback.easy} · Just right: {stats.feedback.balanced} · Too hard: {stats.feedback.hard}</p><p className="stats-note">Your analytics are stored locally in this browser. No account or network connection is needed.</p></div><button className="stats-close" onClick={()=>setShowStats(false)}>Back to puzzle</button></section></div>}
+      {toast&&<div className="toast" role="status">{toast}</div>}
     </main>
   );
 }

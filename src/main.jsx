@@ -6,3 +6,12 @@ import './styles.css';
 createRoot(document.getElementById('root')).render(
   <React.StrictMode><App /></React.StrictMode>
 );
+
+// Offline support is enabled in production builds; local Vite development stays predictable.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      // The game remains playable online even if service-worker registration is blocked.
+    });
+  });
+}
