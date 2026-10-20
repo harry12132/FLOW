@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import LiquidGlass from 'liquid-glass-react';
-import LiquidGlass from 'liquid-glass-react';
 import { cellId, createEmptyPaths, generatePuzzle, getOccupied, isAdjacent, puzzleComplete } from './game.js';
 
 const STORE = 'flow-save-v1';
