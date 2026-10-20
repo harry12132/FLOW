@@ -191,9 +191,11 @@ export function getAdaptiveLevel(level, rating = 50) {
 }
 
 export function scorePuzzlePerformance({ puzzle, elapsedSeconds, hints = 0, resets = 0, backtracks = 0 }) {
-  const expectedSeconds = 18 + puzzle.size * puzzle.size * 0.65 + puzzle.segments.length * 4.5;
+  const structuralDifficulty = puzzle.difficulty?.score ?? estimatePuzzleDifficulty(puzzle).score;
+  const baselineSeconds = 18 + puzzle.size * puzzle.size * 0.65 + puzzle.segments.length * 4.5;
+  const expectedSeconds = baselineSeconds * (0.82 + structuralDifficulty / 100 * 0.36);
   const speedScore = 50 + (1 - Math.max(0, elapsedSeconds) / expectedSeconds) * 35;
-  const supportPenalty = hints * 9 + resets * 8 + backtracks * 1.5;
+  const supportPenalty = hints * 7 + resets * 5 + backtracks * 0.65;
   return Math.max(0, Math.min(100, speedScore - supportPenalty));
 }
 
