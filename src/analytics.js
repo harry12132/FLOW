@@ -1,5 +1,3 @@
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 export const EMPTY_ANALYTICS = Object.freeze({
   sessions: 0,
   starts: 0,
