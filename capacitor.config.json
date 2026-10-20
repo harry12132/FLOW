@@ -1,0 +1,8 @@
+{
+  "appId": "app.flow.puzzle",
+  "appName": "FLOW",
+  "webDir": "dist",
+  "android": {
+    "backgroundColor": "#080d19"
+  }
+}
