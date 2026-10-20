@@ -197,12 +197,6 @@ export function scorePuzzlePerformance({ puzzle, elapsedSeconds, hints = 0, rese
   return Math.max(0, Math.min(100, speedScore - supportPenalty));
 }
 
-export function updateAdaptiveRating(previousRating = 50, performanceScore = 50) {
-  // Smooth updates prevent one unusually easy or difficult puzzle changing the game abruptly.
-  return Math.round(previousRating * 0.7 + performanceScore * 0.3);
-}
-
-
 // Estimate puzzle challenge from puzzle structure alone, never from a judgement about a player.
 // This is a calibrated heuristic, not a claim that every puzzle of a given score feels identical.
 export function estimatePuzzleDifficulty(puzzle) {
@@ -241,7 +235,7 @@ export function estimatePuzzleDifficulty(puzzle) {
     turns,
     turnRate: Number(turnRate.toFixed(3)),
     lengthVariance: Number(lengthVariance.toFixed(2)),
-    ambiguityRisk: Math.round(Math.max(0, Math.min(100, 100 - (endpointScore * 2) + turnRate * 18))),
+    ambiguityRiskEstimate: Math.round(Math.max(0, Math.min(100, (endpointChoices / Math.max(1, pairCount * 6)) * 100))),
   };
 }
 
@@ -257,34 +251,31 @@ export function generateAdaptivePuzzle(level, profile = {}, seed = null, mode = 
   const size = Math.max(5, Math.min(8, defaultSize + sizeShift));
   const pairShift = mode === 'relaxed' ? -1 : mode === 'challenging' ? 1 : rating >= 72 ? 1 : rating <= 28 ? -1 : 0;
   const pairCount = Math.max(3, Math.min(8, defaultPairs + pairShift, Math.floor((size * size) / 3)));
-  const baseline = estimatePuzzleDifficulty({
-    size,
-    segments: Array.from({ length: pairCount }, (_, i) => ({
-      start: { r: 0, c: i }, end: { r: size - 1, c: i },
-      solution: Array.from({ length: Math.max(2, Math.floor((size * size) / pairCount)) }, (_, j) => ({ r: Math.floor(j / size), c: j % size })),
-    })),
-  }).score;
   const modeBias = mode === 'relaxed' ? -9 : mode === 'challenging' ? 9 : 0;
-  const target = Math.max(8, Math.min(96, baseline + (rating - 50) * 0.38 + feedbackBias + modeBias));
   const randomSeed = seed ?? Math.floor(Math.random() * 0xffffffff);
   const variants = mode === 'relaxed' ? 5 : 7;
-  let best = null;
-  let bestDistance = Infinity;
+  const candidates = [];
   for (let i = 0; i < variants; i++) {
     const candidateSeed = (randomSeed + Math.imul(i + 1, 0x45d9f3b)) >>> 0;
     const candidate = generatePuzzle(level, candidateSeed, { size, pairCount });
-    if (!validatePuzzle(candidate)) continue;
-    const score = candidate.difficulty.score;
-    const distance = Math.abs(score - target);
-    // Tiny deterministic variety bonus prevents identical-looking choices dominating ties.
-    const adjustedDistance = distance + ((candidateSeed >>> 4) % 13) / 100;
-    if (adjustedDistance < bestDistance) {
+    if (validatePuzzle(candidate)) candidates.push(candidate);
+  }
+  if (!candidates.length) {
+    const fallback = generatePuzzle(level, randomSeed, { size, pairCount });
+    return { ...fallback, difficulty: { ...fallback.difficulty, target: fallback.difficulty.score, mode, fit: 100 } };
+  }
+  const sortedScores = candidates.map(candidate => candidate.difficulty.score).sort((a, b) => a - b);
+  const baseline = sortedScores[Math.floor(sortedScores.length / 2)];
+  const target = Math.max(8, Math.min(96, baseline + (rating - 50) * 0.38 + feedbackBias + modeBias));
+  let best = candidates[0];
+  let bestDistance = Infinity;
+  for (const candidate of candidates) {
+    const distance = Math.abs(candidate.difficulty.score - target);
+    if (distance < bestDistance) {
       best = candidate;
-      bestDistance = adjustedDistance;
+      bestDistance = distance;
     }
   }
-  // The generator always has a known route-cover fallback; this branch is defensive.
-  if (!best) best = generatePuzzle(level, randomSeed, { size, pairCount });
   return {
     ...best,
     difficulty: { ...best.difficulty, target: Math.round(target), mode, fit: Math.max(0, 100 - Math.round(bestDistance)) },
