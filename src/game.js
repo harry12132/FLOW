@@ -34,7 +34,10 @@ function makeHamiltonianPath(n, random) {
     const start = { r: Math.floor(random() * n), c: Math.floor(random() * n) };
     const path = [start];
     const visited = new Set([key(start)]);
+    let visitedNodes = 0;
     const search = (current) => {
+      visitedNodes++;
+      if (visitedNodes > 6000) return false;
       if (path.length === n * n) return true;
       const choices = neighbors(current, n)
         .filter(p => !visited.has(key(p)))
