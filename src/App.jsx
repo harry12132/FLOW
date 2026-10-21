@@ -4,6 +4,7 @@ import GlassCanvas from './GlassCanvas.jsx';
 import { cellId, createEmptyPaths, generatePuzzle, generateAdaptivePuzzle, getOccupied, isAdjacent, puzzleComplete, scorePuzzlePerformance, updateAdaptiveRating } from './game.js';
 import { appendAnalyticsEvent, analyticsSummary, choosePuzzleVariant, readAnalytics, ratingUncertainty, recordVariantReward, variantRewardFromPerformance } from './analytics.js';
 import { getAchievementMessage } from './engagement.js';
+import { getVictoryHeadline } from './victory.js';
 
 const STORE = 'flow-save-v1';
 const readSave = () => {
@@ -389,7 +390,7 @@ function App() {
       </header>
       <section className="relative z-10 mx-auto flex w-full max-w-5xl flex-col items-center px-4 pb-10 pt-5 sm:px-8 sm:pt-8">
         <div className="mb-5 flex items-center gap-3"><span className="level-pill">{daily?'DAILY':`LEVEL ${String(level).padStart(3,'0')}`}</span><span className="text-sm text-white/45">{puzzle.size} × {puzzle.size}</span></div>
-        <h1 className="mb-2 text-center text-4xl font-medium tracking-[-0.075em] sm:text-5xl">{won?'Perfectly connected.':'Find your flow.'}</h1>
+        <h1 className="mb-2 text-center text-4xl font-medium tracking-[-0.075em] sm:text-5xl">{won?getVictoryHeadline(level):'Find your flow.'}</h1>
         <p className="mb-7 text-center text-sm text-white/45 sm:mb-9">{won?'Every colour. Every cell.':'Connect each pair. Every square should belong to a path.'}</p>
         <div className="board-glass relative w-full max-w-[590px] rounded-[30px] p-3 sm:p-4" ref={boardRef}>
           <div className={`board-inner relative aspect-square w-full overflow-hidden rounded-[20px] ${won?'board-won':''}`} style={{'--size':puzzle.size}} onPointerMove={event=>{if(pointerDown.current&&activeId!==null){const point=cellFromTarget(document.elementFromPoint(event.clientX,event.clientY));if(point)onCellEnter(point)}}}>
