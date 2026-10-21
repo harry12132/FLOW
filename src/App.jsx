@@ -161,7 +161,6 @@ function App() {
     const daySeed = Number(`${localDate.getFullYear()}${String(localDate.getMonth() + 1).padStart(2, '0')}${String(localDate.getDate()).padStart(2, '0')}`);
     const variant = choosePuzzleVariant(adaptive);
     const next = isDaily ? generatePuzzle(nextLevel, daySeed) : generateAdaptivePuzzle(nextLevel, adaptive, null, difficultyMode, variant);
-    puzzleStartedAt.current = Date.now();
     activeElapsedMs.current = 0;
     activeSince.current = typeof document !== 'undefined' && document.visibilityState === 'hidden' ? null : Date.now();
     puzzleMetrics.current = { hints: 0, resets: 0, backtracks: 0 };
