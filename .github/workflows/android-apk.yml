@@ -32,18 +32,16 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
-
           manifest = Path("android/app/src/main/AndroidManifest.xml")
           text = manifest.read_text()
           if "com.google.android.gms.ads.APPLICATION_ID" not in text:
-              text = text.replace("</application>", '    <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="@string/admob_app_id" />\\n  </application>', 1)
+              text = text.replace("</application>", '    <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="@string/admob_app_id" />\n  </application>', 1)
               manifest.write_text(text)
 
           strings = Path("android/app/src/main/res/values/strings.xml")
           text = strings.read_text()
-          if "name=" + chr(34) + "admob_app_id" + chr(34) not in text:
-              text = text.replace("</resources>", '    <string name="admob_app_id">ca-app-pub-6502482353883584~5042848114</string>\\n</resources>', 1)
+          if 'name="admob_app_id"' not in text:
+              text = text.replace("</resources>", '    <string name="admob_app_id">ca-app-pub-6502482353883584~5042848114</string>\n</resources>', 1)
               strings.write_text(text)
           PY
       - name: Build debug APK
