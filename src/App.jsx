@@ -84,7 +84,7 @@ function App() {
       setHintUsage(current => {
         const fresh = readHintUsage();
         if (current.used >= HINT_LIMIT && fresh.used === 0) pendingInterstitial.current = false;
-        return current.used === fresh.used && current.startedAt === fresh.startedAt ? current : fresh;
+        return current.used === fresh.used && current.exhaustedAt === fresh.exhaustedAt ? current : fresh;
       });
     }, 1000);
     return () => window.clearInterval(timer);
