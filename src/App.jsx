@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import LiquidGlass from 'liquid-glass-react';
 import GlassCanvas from './GlassCanvas.jsx';
 import { cellId, createEmptyPaths, generatePuzzle, generateAdaptivePuzzle, getOccupied, isAdjacent, puzzleComplete, scorePuzzlePerformance, updateAdaptiveRating } from './game.js';
-import { appendAnalyticsEvent, analyticsSummary, choosePuzzleVariant, readAnalytics, ratingUncertainty, recordVariantReward } from './analytics.js';
+import { appendAnalyticsEvent, analyticsSummary, choosePuzzleVariant, readAnalytics, ratingUncertainty, recordVariantReward, variantRewardFromPerformance } from './analytics.js';
 import { getAchievementMessage } from './engagement.js';
 
 const STORE = 'flow-save-v1';
@@ -261,7 +261,7 @@ function App() {
               setAdaptive(previous => {
                 const samples = previous.samples + 1;
                 const rated = { ...previous, rating: updateAdaptiveRating(previous.rating, score, previous.samples), samples, uncertainty: ratingUncertainty(samples) };
-                const reward = Math.max(0.05, Math.min(1, 1 - Math.abs(score - 62) / 62));
+                const reward = variantRewardFromPerformance(score);
                 return recordVariantReward(rated, puzzle.difficulty?.variant || 'balanced', reward);
               });
             }
