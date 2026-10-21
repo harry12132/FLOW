@@ -39,6 +39,7 @@ function App() {
   const [activeId, setActiveId] = useState(null);
   const [won, setWon] = useState(false);
   const [achievementMessage, setAchievementMessage] = useState('Every colour. Every cell.');
+  const [victoryHeadline, setVictoryHeadline] = useState(() => getVictoryHeadline());
   const [hintUsage, setHintUsage] = useState(() => readHintUsage());
   const hints = Math.max(0, HINT_LIMIT - hintUsage.used);
   const [hintCell, setHintCell] = useState(null);
@@ -271,6 +272,7 @@ function App() {
         const done = puzzleComplete(puzzle, completed);
         if (done) {
           setWon(true);
+          setVictoryHeadline(getVictoryHeadline());
           setBest(b => Math.max(b, level + 1));
           if (!puzzleResultRecorded.current) {
             puzzleResultRecorded.current = true;
@@ -429,7 +431,7 @@ function App() {
       </header>
       <section className="relative z-10 mx-auto flex w-full max-w-5xl flex-col items-center px-4 pb-10 pt-5 sm:px-8 sm:pt-8">
         <div className="mb-5 flex items-center gap-3"><span className="level-pill">{daily?'DAILY':`LEVEL ${String(level).padStart(3,'0')}`}</span><span className="text-sm text-white/45">{puzzle.size} × {puzzle.size}</span></div>
-        <h1 className="mb-2 text-center text-4xl font-medium tracking-[-0.075em] sm:text-5xl">{won?getVictoryHeadline(level, () => ((level * 0.61803398875) % 1)):'Find your flow.'}</h1>
+        <h1 className="mb-2 text-center text-4xl font-medium tracking-[-0.075em] sm:text-5xl">{won?victoryHeadline:'Find your flow.'}</h1>
         <p className="mb-7 text-center text-sm text-white/45 sm:mb-9">{won?'Every colour. Every cell.':'Connect each pair. Every square should belong to a path.'}</p>
         <div className="board-glass relative w-full max-w-[590px] rounded-[30px] p-3 sm:p-4" ref={boardRef}>
           <div className={`board-inner relative aspect-square w-full overflow-hidden rounded-[20px] ${won?'board-won':''}`} style={{'--size':puzzle.size}} onPointerMove={event=>{if(pointerDown.current&&activeId!==null){const point=cellFromTarget(document.elementFromPoint(event.clientX,event.clientY));if(point)onCellEnter(point)}}}>
@@ -439,10 +441,10 @@ function App() {
             <div className="cell-grid" style={{gridTemplateColumns:`repeat(${puzzle.size},minmax(0,1fr))`}}>{grid.map(point=>{
               const endpoint=isEndpoint(point),owner=Object.entries(paths).find(([,path])=>path.some(p=>same(p,point)));
               const color=endpoint?.color||(owner?puzzle.segments.find(s=>s.id===Number(owner[0]))?.color:null),isHint=same(point,hintCell),isPathEnd=owner&&paths[Number(owner[0])]?.at(-1)&&same(paths[Number(owner[0])].at(-1),point);
-              return <div key={cellId(point)} data-cell={cellId(point)} className={`cell ${endpoint?'endpoint-cell':''} ${owner?'has-path':''} ${isHint?'hint-cell':''} ${isPathEnd?'path-end':''}`} onPointerDown={ev=>onCellPointerDown(ev,point)} style={{'--path-color':color||'transparent',borderRight:point.c===puzzle.size-1?0:undefined,borderBottom:point.r===puzzle.size-1?0:undefined}}>{endpoint&&<span className="endpoint-dot" style={{'--dot-color':endpoint.color}} aria-label={endpoint.name}><span>{endpoint.id + 1}</span></span>}{isHint&&<span className="hint-pulse"/>}</div>
+              return <div key={cellId(point)} data-cell={cellId(point)} className={`cell ${endpoint?'endpoint-cell':''} ${owner?'has-path':''} ${isHint?'hint-cell':''} ${isPathEnd?'path-end':''}`} onPointerDown={ev=>onCellPointerDown(ev,point)} style={{'--path-color':color||'transparent',borderRight:point.c===puzzle.size-1?0:undefined,borderBottom:point.r===puzzle.size-1?0:undefined}}>{endpoint&&<span className="endpoint-dot" style={{'--dot-color':endpoint.color}} role="img" aria-label={`${endpoint.name} endpoint`}/>}{isHint&&<span className="hint-pulse"/>}</div>
             })}</div>
           </div>
-          {won&&<div className="win-overlay"><div className="win-orb">✦</div><h2 className="mt-4 text-2xl font-medium tracking-tight sm:text-3xl">Beautiful.</h2><p className="mt-2 text-sm text-white/55">{achievementMessage}</p><button type="button" className="next-button mt-5" onClick={advanceToNextPuzzle}>Next puzzle <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div>}
+          {won&&<div className="win-overlay"><div className="win-orb">✦</div><h2 className="mt-4 text-2xl font-medium tracking-tight sm:text-3xl">{victoryHeadline}</h2><p className="mt-2 text-sm text-white/55">{achievementMessage}</p><button type="button" className="next-button mt-5" onClick={advanceToNextPuzzle}>Next puzzle <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div>}
         </div>
         <div className="mt-5 flex w-full max-w-[590px] items-center justify-between gap-4 px-1"><div className="flex min-w-0 flex-1 items-center gap-3"><div className="progress-track flex-1"><span style={{width:`${progress}%`}}/></div><span className="w-10 text-right text-xs tabular-nums text-white/50">{progress}%</span></div><button className="hint-button" onClick={useHint} disabled={won} aria-label={`Use hint. ${hints} remaining. Hints refresh every ${HINT_WINDOW_MS / 60000} minutes.`}><svg viewBox="0 0 24 24"><path d="M9 18h6m-5 3h4m-2-19a7 7 0 0 0-4 12.7c.6.4 1 1.1 1 1.8h6c0-.7.4-1.4 1-1.8A7 7 0 0 0 12 2Z"/></svg><span>Hint</span><span className="hint-number">{hints}</span></button></div>
         <div className="mt-4 flex items-center gap-2 text-[11px] tracking-wide text-white/30"><span className="status-dot"/>{solvedCount} of {puzzle.segments.length} paths connected</div>
