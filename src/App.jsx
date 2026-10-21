@@ -357,7 +357,9 @@ function App() {
     const nextHintUsage = consumeHint(hintUsage);
     setHintUsage(nextHintUsage);
     if (nextHintUsage.used >= HINT_LIMIT) pendingInterstitial.current = true;
-    notify('Highlighted the next correct step');
+    notify(nextHintUsage.used >= HINT_LIMIT
+      ? 'Third hint used. Hints refresh in 10 minutes; any ad waits until the next puzzle.'
+      : 'Highlighted the next correct step');
     beep(680, 0.1);
   };
 
@@ -440,7 +442,7 @@ function App() {
           </div>
           {won&&<div className="win-overlay"><div className="win-orb">✦</div><h2 className="mt-4 text-2xl font-medium tracking-tight sm:text-3xl">Beautiful.</h2><p className="mt-2 text-sm text-white/55">{achievementMessage}</p><button type="button" className="next-button mt-5" onClick={advanceToNextPuzzle}>Next puzzle <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div>}
         </div>
-        <div className="mt-5 flex w-full max-w-[590px] items-center justify-between gap-4 px-1"><div className="flex min-w-0 flex-1 items-center gap-3"><div className="progress-track flex-1"><span style={{width:`${progress}%`}}/></div><span className="w-10 text-right text-xs tabular-nums text-white/50">{progress}%</span></div><button className="hint-button" onClick={useHint} disabled={won}><svg viewBox="0 0 24 24"><path d="M9 18h6m-5 3h4m-2-19a7 7 0 0 0-4 12.7c.6.4 1 1.1 1 1.8h6c0-.7.4-1.4 1-1.8A7 7 0 0 0 12 2Z"/></svg><span>Hint</span><span className="hint-number">{hints}</span></button></div>
+        <div className="mt-5 flex w-full max-w-[590px] items-center justify-between gap-4 px-1"><div className="flex min-w-0 flex-1 items-center gap-3"><div className="progress-track flex-1"><span style={{width:`${progress}%`}}/></div><span className="w-10 text-right text-xs tabular-nums text-white/50">{progress}%</span></div><button className="hint-button" onClick={useHint} disabled={won} aria-label={`Use hint. ${hints} remaining. Hints refresh every ${HINT_WINDOW_MS / 60000} minutes.`}><svg viewBox="0 0 24 24"><path d="M9 18h6m-5 3h4m-2-19a7 7 0 0 0-4 12.7c.6.4 1 1.1 1 1.8h6c0-.7.4-1.4 1-1.8A7 7 0 0 0 12 2Z"/></svg><span>Hint</span><span className="hint-number">{hints}</span></button></div>
         <div className="mt-4 flex items-center gap-2 text-[11px] tracking-wide text-white/30"><span className="status-dot"/>{solvedCount} of {puzzle.segments.length} paths connected</div>
         <p className="mt-2 text-[10px] tracking-wide text-white/25">Difficulty adapts to your pace.</p>
       </section>
