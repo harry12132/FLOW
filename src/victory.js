@@ -20,12 +20,15 @@ const HEADLINES = [
   'A stunning solve!',
   'Unreasonably good!',
   'Big brain energy!',
-  'Pure brilliance!',
 ];
 
 export function getVictoryHeadline(level = 1, random = Math.random) {
-  const safeRandom = Number.isFinite(random()) ? random : Math.random;
-  const index = Math.min(HEADLINES.length - 1, Math.max(0, Math.floor(safeRandom() * HEADLINES.length)));
+  let sample;
+  try { sample = Number(random()); } catch { sample = NaN; }
+  const safeRandom = Number.isFinite(sample)
+    ? Math.min(0.999999999999, Math.max(0, sample))
+    : Math.random();
+  const index = Math.floor(safeRandom * HEADLINES.length);
   return HEADLINES[index];
 }
 
