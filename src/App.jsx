@@ -6,7 +6,7 @@ import { appendAnalyticsEvent, analyticsSummary, choosePuzzleVariant, readAnalyt
 import { getAchievementMessage } from './engagement.js';
 import { getVictoryHeadline } from './victory.js';
 import { consumeHint, HINT_LIMIT, HINT_STORAGE_KEY, HINT_WINDOW_MS, readHintUsage } from './hints.js';
-import { initializeAdMob, showInterstitialAtLevelBreak } from './admob.js';
+import { initializeAdMob, showRewardedHintAd } from './admob.js';
 
 const STORE = 'flow-save-v1';
 const readSave = () => {
@@ -57,7 +57,6 @@ function App() {
   const activeSince = useRef(typeof document !== 'undefined' && document.visibilityState === 'hidden' ? null : Date.now());
   const puzzleMetrics = useRef({ hints: 0, resets: 0, backtracks: 0 });
   const puzzleResultRecorded = useRef(false);
-  const pendingInterstitial = useRef(false);
 
   const occupied = useMemo(() => getOccupied(paths, activeId), [paths, activeId]);
   const filled = useMemo(() => Object.values(paths).reduce((n, p) => n + p.length, 0), [paths]);
@@ -83,7 +82,6 @@ function App() {
     const timer = window.setInterval(() => {
       setHintUsage(current => {
         const fresh = readHintUsage();
-        if (current.used >= HINT_LIMIT && fresh.used === 0) pendingInterstitial.current = false;
         return current.used === fresh.used && current.exhaustedAt === fresh.exhaustedAt ? current : fresh;
       });
     }, 1000);
@@ -331,14 +329,13 @@ function App() {
     extendPath(activeId, point);
   };
 
-  const useHint = () => {
-    if (won) { notify('Already solved'); return; }
-    if (hints <= 0) { notify('You have used all 3 hints. They refresh after 10 minutes.'); return; }
+  const revealHint = (consumeTimedHint = true) => {
+    if (won) { notify('Already solved'); return false; }
     const segment = puzzle.segments.find(s => {
       const path = paths[s.id] || [];
       return !(path.length >= 2 && same(path[0], s.start) && same(path.at(-1), s.end));
     });
-    if (!segment) { notify('Every path is connected'); return; }
+    if (!segment) { notify('Every path is connected'); return false; }
     const current = paths[segment.id] || [];
     const reverse = current.length > 0 && same(current[0], segment.end);
     const route = reverse ? [...segment.solution].reverse() : segment.solution;
@@ -347,7 +344,7 @@ function App() {
     const nextPoint = anchorIndex >= 0 ? route[anchorIndex + 1] : null;
     if (!nextPoint) {
       const fallbackIndex = route.findIndex(point => !current.some(existing => same(existing, point)));
-      if (fallbackIndex < 0) { notify('Try completing this connection'); return; }
+      if (fallbackIndex < 0) { notify('Try completing this connection'); return false; }
       setHintCell(route[fallbackIndex]);
       setHintLine(null);
     } else {
@@ -355,21 +352,25 @@ function App() {
       setHintLine([anchor, nextPoint]);
     }
     puzzleMetrics.current.hints += 1;
-    const nextHintUsage = consumeHint(hintUsage);
-    setHintUsage(nextHintUsage);
-    if (nextHintUsage.used >= HINT_LIMIT) pendingInterstitial.current = true;
-    notify(nextHintUsage.used >= HINT_LIMIT
-      ? 'Third hint used. Hints refresh in 10 minutes; any ad waits until the next puzzle.'
-      : 'Highlighted the next correct step');
+    if (consumeTimedHint) setHintUsage(consumeHint(hintUsage));
+    notify(consumeTimedHint ? 'Highlighted the next correct step' : 'Reward earned: bonus hint unlocked');
     beep(680, 0.1);
+    return true;
   };
 
-  const advanceToNextPuzzle = async () => {
-    const shouldShowAd = pendingInterstitial.current;
-    pendingInterstitial.current = false;
-    if (shouldShowAd) await showInterstitialAtLevelBreak();
-    installLevel(level + 1);
+  const useHint = async () => {
+    if (won) { notify('Already solved'); return; }
+    if (hints > 0) { revealHint(true); return; }
+    notify('Watch a short ad to earn one bonus hint. Your 3 hints refresh after 10 minutes.');
+    const rewarded = await showRewardedHintAd();
+    if (rewarded) {
+      revealHint(false);
+    } else {
+      notify('Rewarded ad unavailable right now. Your hints still refresh after 10 minutes.');
+    }
   };
+
+  const advanceToNextPuzzle = () => installLevel(level + 1);
 
   const shareChallenge = async () => {
     const url = new URL(window.location.href);
