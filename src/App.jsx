@@ -3,6 +3,7 @@ import LiquidGlass from 'liquid-glass-react';
 import GlassCanvas from './GlassCanvas.jsx';
 import { cellId, createEmptyPaths, generatePuzzle, generateAdaptivePuzzle, getOccupied, isAdjacent, puzzleComplete, scorePuzzlePerformance, updateAdaptiveRating } from './game.js';
 import { appendAnalyticsEvent, analyticsSummary, choosePuzzleVariant, readAnalytics, ratingUncertainty, recordVariantReward } from './analytics.js';
+import { getAchievementMessage } from './engagement.js';
 
 const STORE = 'flow-save-v1';
 const readSave = () => {
@@ -34,6 +35,7 @@ function App() {
   const [paths, setPaths] = useState({});
   const [activeId, setActiveId] = useState(null);
   const [won, setWon] = useState(false);
+  const [achievementMessage, setAchievementMessage] = useState('Every colour. Every cell.');
   const [hints, setHints] = useState(3);
   const [hintCell, setHintCell] = useState(null);
   const [hintLine, setHintLine] = useState(null);
@@ -170,6 +172,7 @@ function App() {
     setPaths(createEmptyPaths(next));
     setActiveId(null);
     setWon(false);
+    setAchievementMessage('Every colour. Every cell.');
     setHintCell(null);
     setHintLine(null);
     setDaily(isDaily);
@@ -250,14 +253,17 @@ function App() {
           if (!puzzleResultRecorded.current) {
             puzzleResultRecorded.current = true;
             const elapsedSeconds = Math.max(0, (activeElapsedMs.current + (activeSince.current === null ? 0 : Date.now() - activeSince.current)) / 1000);
-            recordEvent('puzzle_complete', { level, elapsedSeconds: Math.round(elapsedSeconds), hints: puzzleMetrics.current.hints, resets: puzzleMetrics.current.resets, backtracks: puzzleMetrics.current.backtracks, difficulty: puzzle.difficulty?.score, variant: puzzle.difficulty?.variant, daily });
+            const metrics = { ...puzzleMetrics.current };
+            const score = scorePuzzlePerformance({ puzzle, elapsedSeconds, ...metrics });
+            setAchievementMessage(getAchievementMessage({ level, score, elapsedSeconds, ...metrics }));
+            recordEvent('puzzle_complete', { level, elapsedSeconds: Math.round(elapsedSeconds), hints: metrics.hints, resets: metrics.resets, backtracks: metrics.backtracks, performanceScore: Math.round(score), difficulty: puzzle.difficulty?.score, variant: puzzle.difficulty?.variant, daily });
             if (!daily) {
-              const score = scorePuzzlePerformance({ puzzle, elapsedSeconds, ...puzzleMetrics.current });
               setAdaptive(previous => {
                 const samples = previous.samples + 1;
-                return { ...previous, rating: updateAdaptiveRating(previous.rating, score, previous.samples), samples, uncertainty: ratingUncertainty(samples) };
+                const rated = { ...previous, rating: updateAdaptiveRating(previous.rating, score, previous.samples), samples, uncertainty: ratingUncertainty(samples) };
+                const reward = Math.max(0.05, Math.min(1, 1 - Math.abs(score - 62) / 62));
+                return recordVariantReward(rated, puzzle.difficulty?.variant || 'balanced', reward);
               });
-              setAdaptive(previous => recordVariantReward(previous, puzzle.difficulty?.variant || 'balanced', 0.6));
             }
           }
           beep(760, 0.18);
@@ -396,7 +402,7 @@ function App() {
               return <div key={cellId(point)} data-cell={cellId(point)} className={`cell ${endpoint?'endpoint-cell':''} ${owner?'has-path':''} ${isHint?'hint-cell':''} ${isPathEnd?'path-end':''}`} onPointerDown={ev=>onCellPointerDown(ev,point)} style={{'--path-color':color||'transparent',borderRight:point.c===puzzle.size-1?0:undefined,borderBottom:point.r===puzzle.size-1?0:undefined}}>{endpoint&&<span className="endpoint-dot" style={{'--dot-color':endpoint.color}}><span/></span>}{isHint&&<span className="hint-pulse"/>}</div>
             })}</div>
           </div>
-          {won&&<div className="win-overlay"><div className="win-orb">✦</div><h2 className="mt-4 text-2xl font-medium tracking-tight sm:text-3xl">Beautiful.</h2><p className="mt-2 text-sm text-white/55">You found every connection.</p><button type="button" className="next-button mt-5" onClick={()=>installLevel(level+1)}>Next puzzle <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div>}
+          {won&&<div className="win-overlay"><div className="win-orb">✦</div><h2 className="mt-4 text-2xl font-medium tracking-tight sm:text-3xl">Beautiful.</h2><p className="mt-2 text-sm text-white/55">{achievementMessage}</p><button type="button" className="next-button mt-5" onClick={()=>installLevel(level+1)}>Next puzzle <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div>}
         </div>
         <div className="mt-5 flex w-full max-w-[590px] items-center justify-between gap-4 px-1"><div className="flex min-w-0 flex-1 items-center gap-3"><div className="progress-track flex-1"><span style={{width:`${progress}%`}}/></div><span className="w-10 text-right text-xs tabular-nums text-white/50">{progress}%</span></div><button className="hint-button" onClick={useHint} disabled={won}><svg viewBox="0 0 24 24"><path d="M9 18h6m-5 3h4m-2-19a7 7 0 0 0-4 12.7c.6.4 1 1.1 1 1.8h6c0-.7.4-1.4 1-1.8A7 7 0 0 0 12 2Z"/></svg><span>Hint</span><span className="hint-number">{hints}</span></button></div>
         <div className="mt-4 flex items-center gap-2 text-[11px] tracking-wide text-white/30"><span className="status-dot"/>{solvedCount} of {puzzle.segments.length} paths connected</div>
