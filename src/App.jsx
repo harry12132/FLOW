@@ -5,6 +5,8 @@ import { cellId, createEmptyPaths, generatePuzzle, generateAdaptivePuzzle, getOc
 import { appendAnalyticsEvent, analyticsSummary, choosePuzzleVariant, readAnalytics, ratingUncertainty, recordVariantReward, variantRewardFromPerformance } from './analytics.js';
 import { getAchievementMessage } from './engagement.js';
 import { getVictoryHeadline } from './victory.js';
+import { consumeHint, HINT_LIMIT, HINT_STORAGE_KEY, HINT_WINDOW_MS, readHintUsage } from './hints.js';
+import { initializeAdMob, showInterstitialAtLevelBreak } from './admob.js';
 
 const STORE = 'flow-save-v1';
 const readSave = () => {
@@ -28,16 +30,17 @@ function App() {
   const [best, setBest] = useState(initial.best || 1);
   const [sound, setSound] = useState(initial.sound !== false);
   const [adaptive, setAdaptive] = useState(() => ({ rating: Math.max(0, Math.min(100, initial.adaptive?.rating ?? 50)), samples: initial.adaptive?.samples ?? 0, feedbackBias: initial.adaptive?.feedbackBias ?? 0, arms: initial.adaptive?.arms ?? {}, uncertainty: initial.adaptive?.uncertainty ?? ratingUncertainty(initial.adaptive?.samples ?? 0) }));
-  const [difficultyMode, setDifficultyMode] = useState(initial.difficultyMode || 'adaptive');
+  const difficultyMode = 'adaptive';
   const [reminderEnabled, setReminderEnabled] = useState(initial.reminderEnabled === true);
   const [puzzle, setPuzzle] = useState(() => challengeParams
     ? generatePuzzle(challengeParams.level, challengeParams.seed, { size: challengeParams.size, pairCount: challengeParams.pairs })
-    : generateAdaptivePuzzle(Math.max(1, initial.level || 1), initial.adaptive || {}, null, initial.difficultyMode || 'adaptive', choosePuzzleVariant(initial.adaptive || {})));
+    : generateAdaptivePuzzle(Math.max(1, initial.level || 1), initial.adaptive || {}, null, 'adaptive', choosePuzzleVariant(initial.adaptive || {})));
   const [paths, setPaths] = useState({});
   const [activeId, setActiveId] = useState(null);
   const [won, setWon] = useState(false);
   const [achievementMessage, setAchievementMessage] = useState('Every colour. Every cell.');
-  const [hints, setHints] = useState(3);
+  const [hintUsage, setHintUsage] = useState(() => readHintUsage());
+  const hints = Math.max(0, HINT_LIMIT - hintUsage.used);
   const [hintCell, setHintCell] = useState(null);
   const [hintLine, setHintLine] = useState(null);
   const [showMenu, setShowMenu] = useState(false);
@@ -54,6 +57,7 @@ function App() {
   const activeSince = useRef(typeof document !== 'undefined' && document.visibilityState === 'hidden' ? null : Date.now());
   const puzzleMetrics = useRef({ hints: 0, resets: 0, backtracks: 0 });
   const puzzleResultRecorded = useRef(false);
+  const pendingInterstitial = useRef(false);
 
   const occupied = useMemo(() => getOccupied(paths, activeId), [paths, activeId]);
   const filled = useMemo(() => Object.values(paths).reduce((n, p) => n + p.length, 0), [paths]);
@@ -64,12 +68,30 @@ function App() {
   const stats = analyticsSummary(analytics);
 
   useEffect(() => {
-    localStorage.setItem(STORE, JSON.stringify({ level, best, sound, adaptive, difficultyMode, reminderEnabled }));
-  }, [level, best, sound, adaptive, difficultyMode, reminderEnabled]);
+    localStorage.setItem(STORE, JSON.stringify({ level, best, sound, adaptive, reminderEnabled }));
+  }, [level, best, sound, adaptive, reminderEnabled]);
 
   useEffect(() => {
     try { localStorage.setItem('flow-analytics-v1', JSON.stringify(analytics)); } catch { /* Analytics are optional; the game still works without storage. */ }
   }, [analytics]);
+
+  useEffect(() => {
+    try { localStorage.setItem(HINT_STORAGE_KEY, JSON.stringify(hintUsage)); } catch { /* Hints still work for this session without storage. */ }
+  }, [hintUsage]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setHintUsage(current => {
+        const fresh = readHintUsage();
+        return current.used === fresh.used && current.startedAt === fresh.startedAt ? current : fresh;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    void initializeAdMob();
+  }, []);
 
   useEffect(() => {
     if (sessionRecorded.current) return;
@@ -163,7 +185,7 @@ function App() {
     const localDate = new Date();
     const daySeed = Number(`${localDate.getFullYear()}${String(localDate.getMonth() + 1).padStart(2, '0')}${String(localDate.getDate()).padStart(2, '0')}`);
     const variant = choosePuzzleVariant(adaptive);
-    const next = isDaily ? generatePuzzle(nextLevel, daySeed) : generateAdaptivePuzzle(nextLevel, adaptive, null, difficultyMode, variant);
+    const next = isDaily ? generatePuzzle(nextLevel, daySeed) : generateAdaptivePuzzle(nextLevel, adaptive, null, 'adaptive', variant);
     activeElapsedMs.current = 0;
     activeSince.current = typeof document !== 'undefined' && document.visibilityState === 'hidden' ? null : Date.now();
     puzzleMetrics.current = { hints: 0, resets: 0, backtracks: 0 };
@@ -259,9 +281,12 @@ function App() {
             setAchievementMessage(getAchievementMessage({ level, score, elapsedSeconds, ...metrics }));
             recordEvent('puzzle_complete', { level, elapsedSeconds: Math.round(elapsedSeconds), hints: metrics.hints, resets: metrics.resets, backtracks: metrics.backtracks, performanceScore: Math.round(score), difficulty: puzzle.difficulty?.score, variant: puzzle.difficulty?.variant, daily });
             if (!daily) {
+              const fastSolve = elapsedSeconds <= 20 && metrics.hints === 0 && metrics.resets === 0;
               setAdaptive(previous => {
                 const samples = previous.samples + 1;
-                const rated = { ...previous, rating: updateAdaptiveRating(previous.rating, score, previous.samples), samples, uncertainty: ratingUncertainty(samples) };
+                const fastStreak = fastSolve ? Math.min(10, (previous.fastStreak || 0) + 1) : 0;
+                const adaptiveScore = fastSolve ? Math.max(score, 90) : score;
+                const rated = { ...previous, fastStreak, rating: updateAdaptiveRating(previous.rating, adaptiveScore, previous.samples), samples, uncertainty: ratingUncertainty(samples) };
                 const reward = variantRewardFromPerformance(score);
                 return recordVariantReward(rated, puzzle.difficulty?.variant || 'balanced', reward);
               });
@@ -306,7 +331,8 @@ function App() {
   };
 
   const useHint = () => {
-    if (hints <= 0 || won) { notify(hints <= 0 ? 'No hints left' : 'Already solved'); return; }
+    if (won) { notify('Already solved'); return; }
+    if (hints <= 0) { notify('You have used all 3 hints. They refresh after 10 minutes.'); return; }
     const segment = puzzle.segments.find(s => {
       const path = paths[s.id] || [];
       return !(path.length >= 2 && same(path[0], s.start) && same(path.at(-1), s.end));
@@ -328,9 +354,18 @@ function App() {
       setHintLine([anchor, nextPoint]);
     }
     puzzleMetrics.current.hints += 1;
-    setHints(h => h - 1);
+    const nextHintUsage = consumeHint(hintUsage);
+    setHintUsage(nextHintUsage);
+    if (nextHintUsage.used >= HINT_LIMIT) pendingInterstitial.current = true;
     notify('Highlighted the next correct step');
     beep(680, 0.1);
+  };
+
+  const advanceToNextPuzzle = async () => {
+    const shouldShowAd = pendingInterstitial.current;
+    pendingInterstitial.current = false;
+    if (shouldShowAd) await showInterstitialAtLevelBreak();
+    installLevel(level + 1);
   };
 
   const shareChallenge = async () => {
@@ -400,17 +435,17 @@ function App() {
             <div className="cell-grid" style={{gridTemplateColumns:`repeat(${puzzle.size},minmax(0,1fr))`}}>{grid.map(point=>{
               const endpoint=isEndpoint(point),owner=Object.entries(paths).find(([,path])=>path.some(p=>same(p,point)));
               const color=endpoint?.color||(owner?puzzle.segments.find(s=>s.id===Number(owner[0]))?.color:null),isHint=same(point,hintCell),isPathEnd=owner&&paths[Number(owner[0])]?.at(-1)&&same(paths[Number(owner[0])].at(-1),point);
-              return <div key={cellId(point)} data-cell={cellId(point)} className={`cell ${endpoint?'endpoint-cell':''} ${owner?'has-path':''} ${isHint?'hint-cell':''} ${isPathEnd?'path-end':''}`} onPointerDown={ev=>onCellPointerDown(ev,point)} style={{'--path-color':color||'transparent',borderRight:point.c===puzzle.size-1?0:undefined,borderBottom:point.r===puzzle.size-1?0:undefined}}>{endpoint&&<span className="endpoint-dot" style={{'--dot-color':endpoint.color}}><span/></span>}{isHint&&<span className="hint-pulse"/>}</div>
+              return <div key={cellId(point)} data-cell={cellId(point)} className={`cell ${endpoint?'endpoint-cell':''} ${owner?'has-path':''} ${isHint?'hint-cell':''} ${isPathEnd?'path-end':''}`} onPointerDown={ev=>onCellPointerDown(ev,point)} style={{'--path-color':color||'transparent',borderRight:point.c===puzzle.size-1?0:undefined,borderBottom:point.r===puzzle.size-1?0:undefined}}>{endpoint&&<span className="endpoint-dot" style={{'--dot-color':endpoint.color}} aria-label={endpoint.name}><span>{endpoint.id + 1}</span></span>}{isHint&&<span className="hint-pulse"/>}</div>
             })}</div>
           </div>
-          {won&&<div className="win-overlay"><div className="win-orb">✦</div><h2 className="mt-4 text-2xl font-medium tracking-tight sm:text-3xl">Beautiful.</h2><p className="mt-2 text-sm text-white/55">{achievementMessage}</p><button type="button" className="next-button mt-5" onClick={()=>installLevel(level+1)}>Next puzzle <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div>}
+          {won&&<div className="win-overlay"><div className="win-orb">✦</div><h2 className="mt-4 text-2xl font-medium tracking-tight sm:text-3xl">Beautiful.</h2><p className="mt-2 text-sm text-white/55">{achievementMessage}</p><button type="button" className="next-button mt-5" onClick={advanceToNextPuzzle}>Next puzzle <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div>}
         </div>
         <div className="mt-5 flex w-full max-w-[590px] items-center justify-between gap-4 px-1"><div className="flex min-w-0 flex-1 items-center gap-3"><div className="progress-track flex-1"><span style={{width:`${progress}%`}}/></div><span className="w-10 text-right text-xs tabular-nums text-white/50">{progress}%</span></div><button className="hint-button" onClick={useHint} disabled={won}><svg viewBox="0 0 24 24"><path d="M9 18h6m-5 3h4m-2-19a7 7 0 0 0-4 12.7c.6.4 1 1.1 1 1.8h6c0-.7.4-1.4 1-1.8A7 7 0 0 0 12 2Z"/></svg><span>Hint</span><span className="hint-number">{hints}</span></button></div>
         <div className="mt-4 flex items-center gap-2 text-[11px] tracking-wide text-white/30"><span className="status-dot"/>{solvedCount} of {puzzle.segments.length} paths connected</div>
         <p className="mt-2 text-[10px] tracking-wide text-white/25">Difficulty adapts to your pace.</p>
       </section>
       <footer className="relative z-10 mx-auto flex w-full max-w-5xl items-center justify-between px-5 pb-5 text-[10px] tracking-wide text-white/25 sm:px-8"><span>FLOW</span><span>{Math.max(0,best-1)} completed</span></footer>
-      {showMenu&&<div className="menu-backdrop" onClick={()=>setShowMenu(false)}><div className="menu-glass" onClick={ev=>ev.stopPropagation()}><button onClick={()=>installLevel(1)}>Restart from level one</button><button onClick={()=>installLevel(level,true)}>Daily puzzle</button><button onClick={()=>{setShowStats(true);setShowMenu(false)}}>Player stats</button><button onClick={shareChallenge}>Share this puzzle</button><button onClick={()=>{const modes=['adaptive','relaxed','standard','challenging'];const next=modes[(modes.indexOf(difficultyMode)+1)%modes.length];setDifficultyMode(next);setShowMenu(false);notify('Difficulty: '+next)}}>Difficulty: {difficultyMode}</button><button onClick={()=>{setReminderEnabled(v=>!v);setShowMenu(false);notify('In-app return reminder '+(!reminderEnabled?'on':'off'))}}>Return reminder: {reminderEnabled?'on':'off'}</button><button onClick={()=>{setSound(v=>!v);setShowMenu(false)}}>{sound?'Sound off':'Sound on'}</button><p>Stats stay on this device. Reminders are in-app only. FLOW works offline after its first load.</p></div></div>}
+      {showMenu&&<div className="menu-backdrop" onClick={()=>setShowMenu(false)}><div className="menu-glass" onClick={ev=>ev.stopPropagation()}><button onClick={()=>installLevel(1)}>Restart from level one</button><button onClick={()=>installLevel(level,true)}>Daily puzzle</button><button onClick={()=>{setShowStats(true);setShowMenu(false)}}>Player stats</button><button onClick={shareChallenge}>Share this puzzle</button><button onClick={()=>{setReminderEnabled(v=>!v);setShowMenu(false);notify('In-app return reminder '+(!reminderEnabled?'on':'off'))}}>Return reminder: {reminderEnabled?'on':'off'}</button><button onClick={()=>{setSound(v=>!v);setShowMenu(false)}}>{sound?'Sound off':'Sound on'}</button><p>Stats stay on this device. Reminders are in-app only. FLOW works offline after its first load.</p></div></div>}
       {showStats&&<div className="stats-backdrop" onClick={()=>setShowStats(false)}><section className="stats-panel" role="dialog" aria-modal="true" aria-label="Player stats" onClick={ev=>ev.stopPropagation()}><div className="stats-heading"><div><span className="stats-eyebrow">YOUR FLOW</span><h2>Player stats</h2></div><button onClick={()=>setShowStats(false)} aria-label="Close stats">×</button></div><div className="stats-rating"><span>Adaptive rating</span><strong>{adaptive.rating}<small>/100</small></strong><p>Estimated challenge fit · uncertainty ±{adaptive.uncertainty ?? ratingUncertainty(adaptive.samples)}</p></div><div className="stats-grid"><div><strong>{stats.completions}</strong><span>Puzzles solved</span></div><div><strong>{stats.averageSolveSeconds ? Math.floor(stats.averageSolveSeconds/60)+'m '+stats.averageSolveSeconds%60+'s' : '—'}</strong><span>Average solve</span></div><div><strong>{stats.returnDays}</strong><span>Days played</span></div><div><strong>{stats.abandonments}</strong><span>Unfinished</span></div><div><strong>{stats.hintsPerPuzzle}</strong><span>Hints per solve</span></div><div><strong>{stats.resetsPerPuzzle}</strong><span>Resets per solve</span></div></div><div className="stats-section"><h3>Difficulty feedback</h3><p>Too easy: {stats.feedback.easy} · Just right: {stats.feedback.balanced} · Too hard: {stats.feedback.hard}</p><p className="stats-note">Your analytics are stored locally in this browser. No account or network connection is needed.</p></div><button className="stats-close" onClick={()=>setShowStats(false)}>Back to puzzle</button></section></div>}
       {toast&&<div className="toast" role="status">{toast}</div>}
     </main>
