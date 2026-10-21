@@ -83,6 +83,7 @@ function App() {
     const timer = window.setInterval(() => {
       setHintUsage(current => {
         const fresh = readHintUsage();
+        if (current.used >= HINT_LIMIT && fresh.used === 0) pendingInterstitial.current = false;
         return current.used === fresh.used && current.startedAt === fresh.startedAt ? current : fresh;
       });
     }, 1000);
