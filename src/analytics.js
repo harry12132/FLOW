@@ -89,6 +89,14 @@ export function recordVariantReward(adaptive = {}, variant = 'balanced', reward 
   return { ...adaptive, arms };
 }
 
+// Reward variants for a useful challenge: very low performance can mean too hard,
+// while extremely high performance can mean too easy. The middle is a starting
+// heuristic, not a scientifically calibrated threshold; local play data can tune it.
+export function variantRewardFromPerformance(score = 50) {
+  const bounded = Math.max(0, Math.min(100, Number(score) || 0));
+  return Math.max(0.05, Math.min(1, 1 - Math.abs(bounded - 62) / 62));
+}
+
 export function ratingUncertainty(samples = 0) {
   return Math.round(Math.max(8, Math.min(35, 35 / Math.sqrt(Math.max(1, samples + 1)))));
 }
