@@ -1,0 +1,54 @@
+name: Build FLOW Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/adaptive-gameplay-offline]
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+      - run: npm install
+      - run: npm run test
+      - run: npm run build
+      - run: npx cap add android
+      - run: npx cap sync android
+      - name: Configure AdMob application ID
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          text = manifest.read_text()
+          if "com.google.android.gms.ads.APPLICATION_ID" not in text:
+              text = text.replace("</application>", '    <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="@string/admob_app_id" />\n  </application>', 1)
+              manifest.write_text(text)
+
+          strings = Path("android/app/src/main/res/values/strings.xml")
+          text = strings.read_text()
+          if 'name="admob_app_id"' not in text:
+              text = text.replace("</resources>", '    <string name="admob_app_id">ca-app-pub-6502482353883584~5042848114</string>\n</resources>', 1)
+              strings.write_text(text)
+          PY
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flow-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14

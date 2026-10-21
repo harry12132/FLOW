@@ -1,7 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import LiquidGlass from 'liquid-glass-react';
 import GlassCanvas from './GlassCanvas.jsx';
-import { cellId, createEmptyPaths, generatePuzzle, getOccupied, isAdjacent, puzzleComplete, getAdaptiveLevel, scorePuzzlePerformance, updateAdaptiveRating } from './game.js';
+import { cellId, createEmptyPaths, generatePuzzle, generateAdaptivePuzzle, getOccupied, isAdjacent, puzzleComplete, scorePuzzlePerformance, updateAdaptiveRating } from './game.js';
+import { appendAnalyticsEvent, analyticsSummary, choosePuzzleVariant, readAnalytics, ratingUncertainty, recordVariantReward, variantRewardFromPerformance } from './analytics.js';
+import { getAchievementMessage } from './engagement.js';
+import { getVictoryHeadline } from './victory.js';
+import { consumeHint, HINT_LIMIT, HINT_STORAGE_KEY, HINT_WINDOW_MS, readHintUsage } from './hints.js';
+import { initializeAdMob, showRewardedHintAd } from './admob.js';
 
 const STORE = 'flow-save-v1';
 const readSave = () => {
@@ -11,24 +16,46 @@ const same = (a, b) => a && b && a.r === b.r && a.c === b.c;
 
 function App() {
   const initial = useMemo(() => readSave(), []);
-  const [level, setLevel] = useState(Math.max(1, initial.level || 1));
+  const challengeParams = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('challenge')) return null;
+    const seed = Number(params.get('challenge'));
+    const challengeLevel = Number(params.get('level'));
+    const size = Number(params.get('size'));
+    const pairs = Number(params.get('pairs'));
+    if (!Number.isFinite(seed) || !Number.isFinite(challengeLevel) || challengeLevel < 1 || challengeLevel > 10000 || !Number.isInteger(size) || size < 5 || size > 8 || !Number.isInteger(pairs) || pairs < 3 || pairs > 8) return null;
+    return { seed: seed >>> 0, level: Math.floor(challengeLevel), size, pairs };
+  }, []);
+  const [level, setLevel] = useState(Math.max(1, challengeParams?.level || initial.level || 1));
   const [best, setBest] = useState(initial.best || 1);
   const [sound, setSound] = useState(initial.sound !== false);
-  const [adaptive, setAdaptive] = useState(() => ({ rating: Math.max(0, Math.min(100, initial.adaptive?.rating ?? 50)), samples: initial.adaptive?.samples ?? 0 }));
-  const [puzzle, setPuzzle] = useState(() => generatePuzzle(getAdaptiveLevel(Math.max(1, initial.level || 1), initial.adaptive?.rating ?? 50)));
+  const [adaptive, setAdaptive] = useState(() => ({ rating: Math.max(0, Math.min(100, initial.adaptive?.rating ?? 50)), samples: initial.adaptive?.samples ?? 0, fastStreak: initial.adaptive?.fastStreak ?? 0, feedbackBias: initial.adaptive?.feedbackBias ?? 0, arms: initial.adaptive?.arms ?? {}, uncertainty: initial.adaptive?.uncertainty ?? ratingUncertainty(initial.adaptive?.samples ?? 0) }));
+  const difficultyMode = 'adaptive';
+  const [reminderEnabled, setReminderEnabled] = useState(initial.reminderEnabled === true);
+  const [puzzle, setPuzzle] = useState(() => challengeParams
+    ? generatePuzzle(challengeParams.level, challengeParams.seed, { size: challengeParams.size, pairCount: challengeParams.pairs })
+    : generateAdaptivePuzzle(Math.max(1, initial.level || 1), initial.adaptive || {}, null, 'adaptive', choosePuzzleVariant(initial.adaptive || {})));
   const [paths, setPaths] = useState({});
   const [activeId, setActiveId] = useState(null);
   const [won, setWon] = useState(false);
-  const [hints, setHints] = useState(3);
+  const [achievementMessage, setAchievementMessage] = useState('Every colour. Every cell.');
+  const [victoryHeadline, setVictoryHeadline] = useState(() => getVictoryHeadline());
+  const [hintUsage, setHintUsage] = useState(() => readHintUsage());
+  const hints = Math.max(0, HINT_LIMIT - hintUsage.used);
   const [hintCell, setHintCell] = useState(null);
+  const [hintLine, setHintLine] = useState(null);
   const [showMenu, setShowMenu] = useState(false);
   const [toast, setToast] = useState('');
   const [daily, setDaily] = useState(false);
+  const [showStats, setShowStats] = useState(false);
+  const [analytics, setAnalytics] = useState(() => readAnalytics());
+  const sessionRecorded = useRef(false);
   const boardRef = useRef(null);
   const pointerDown = useRef(false);
   const lastPointerCell = useRef(null);
   const audioRef = useRef(null);
-  const puzzleStartedAt = useRef(Date.now());
+  const activeElapsedMs = useRef(0);
+  const activeSince = useRef(typeof document !== 'undefined' && document.visibilityState === 'hidden' ? null : Date.now());
   const puzzleMetrics = useRef({ hints: 0, resets: 0, backtracks: 0 });
   const puzzleResultRecorded = useRef(false);
 
@@ -37,9 +64,72 @@ function App() {
   const total = puzzle.size * puzzle.size;
   const progress = Math.round((filled / total) * 100);
 
+  const recordEvent = (type, detail = {}) => setAnalytics(previous => appendAnalyticsEvent(previous, type, detail));
+  const stats = analyticsSummary(analytics);
+
   useEffect(() => {
-    localStorage.setItem(STORE, JSON.stringify({ level, best, sound, adaptive }));
-  }, [level, best, sound, adaptive]);
+    localStorage.setItem(STORE, JSON.stringify({ level, best, sound, adaptive, reminderEnabled }));
+  }, [level, best, sound, adaptive, reminderEnabled]);
+
+  useEffect(() => {
+    try { localStorage.setItem('flow-analytics-v1', JSON.stringify(analytics)); } catch { /* Analytics are optional; the game still works without storage. */ }
+  }, [analytics]);
+
+  useEffect(() => {
+    try { localStorage.setItem(HINT_STORAGE_KEY, JSON.stringify(hintUsage)); } catch { /* Hints still work for this session without storage. */ }
+  }, [hintUsage]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setHintUsage(current => {
+        const fresh = readHintUsage();
+        return current.used === fresh.used && current.exhaustedAt === fresh.exhaustedAt ? current : fresh;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    void initializeAdMob();
+  }, []);
+
+  useEffect(() => {
+    if (sessionRecorded.current) return;
+    sessionRecorded.current = true;
+    recordEvent('session_start');
+    recordEvent('puzzle_start', { level, mode: challengeParams ? 'shared' : difficultyMode, variant: puzzle.difficulty?.variant });
+    try {
+      const now = Date.now();
+      const lastOpen = Number(localStorage.getItem('flow-last-open') || 0);
+      if (reminderEnabled && lastOpen && now - lastOpen >= 24 * 60 * 60 * 1000) notify('Your optional FLOW reminder: a fresh puzzle is waiting.');
+      localStorage.setItem('flow-last-open', String(now));
+    } catch { /* Reminders are optional and never block play. */ }
+  }, []);
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.hidden && activeSince.current !== null) {
+        activeElapsedMs.current += Date.now() - activeSince.current;
+        activeSince.current = null;
+      } else if (!document.hidden && activeSince.current === null) {
+        activeSince.current = Date.now();
+      }
+    };
+    const onPageHide = () => {
+      if (puzzleResultRecorded.current) return;
+      try {
+        const current = readAnalytics();
+        const next = appendAnalyticsEvent(current, 'puzzle_abandon', { level, mode: difficultyMode, reason: 'pagehide' });
+        localStorage.setItem('flow-analytics-v1', JSON.stringify(next));
+      } catch { /* The puzzle remains playable if browser storage is unavailable. */ }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', onPageHide);
+    };
+  }, [level, difficultyMode]);
 
   useEffect(() => {
     const stop = () => {
@@ -86,10 +176,18 @@ function App() {
   };
 
   const installLevel = (nextLevel, isDaily = false) => {
-    const daySeed = Number(new Date().toISOString().slice(0, 10).replaceAll('-', ''));
-    const effectiveLevel = isDaily ? nextLevel : getAdaptiveLevel(nextLevel, adaptive.rating);
-    const next = generatePuzzle(effectiveLevel, isDaily ? daySeed : null);
-    puzzleStartedAt.current = Date.now();
+    if (window.location.search.includes('challenge=')) {
+      const params = new URLSearchParams(window.location.search);
+      ['challenge', 'level', 'size', 'pairs'].forEach(key => params.delete(key));
+      window.history.replaceState({}, '', window.location.pathname + (params.toString() ? `?${params.toString()}` : '') + window.location.hash);
+    }
+    if (!won && !puzzleResultRecorded.current && sessionRecorded.current) recordEvent('puzzle_abandon', { level, mode: difficultyMode });
+    const localDate = new Date();
+    const daySeed = Number(`${localDate.getFullYear()}${String(localDate.getMonth() + 1).padStart(2, '0')}${String(localDate.getDate()).padStart(2, '0')}`);
+    const variant = choosePuzzleVariant(adaptive);
+    const next = isDaily ? generatePuzzle(nextLevel, daySeed) : generateAdaptivePuzzle(nextLevel, adaptive, null, 'adaptive', variant);
+    activeElapsedMs.current = 0;
+    activeSince.current = typeof document !== 'undefined' && document.visibilityState === 'hidden' ? null : Date.now();
     puzzleMetrics.current = { hints: 0, resets: 0, backtracks: 0 };
     puzzleResultRecorded.current = false;
     setLevel(nextLevel);
@@ -97,8 +195,11 @@ function App() {
     setPaths(createEmptyPaths(next));
     setActiveId(null);
     setWon(false);
+    setAchievementMessage('Every colour. Every cell.');
     setHintCell(null);
+    setHintLine(null);
     setDaily(isDaily);
+    recordEvent('puzzle_start', { level: nextLevel, mode: isDaily ? 'daily' : difficultyMode, variant: next.difficulty?.variant, difficulty: next.difficulty?.score });
     setShowMenu(false);
   };
 
@@ -108,6 +209,7 @@ function App() {
     setActiveId(null);
     setWon(false);
     setHintCell(null);
+    setHintLine(null);
     beep(300, 0.07);
   };
 
@@ -132,6 +234,7 @@ function App() {
     pointerDown.current = true;
     lastPointerCell.current = cellId(seed);
     setHintCell(null);
+    setHintLine(null);
     beep(420, 0.04);
   };
 
@@ -158,6 +261,7 @@ function App() {
     const next = [...current, point];
     setPaths(prev => ({ ...prev, [segmentId]: next }));
     setHintCell(null);
+    setHintLine(null);
     beep(500 + Math.min(5, next.length) * 35, 0.025);
     if (same(point, segment.end) || same(point, segment.start)) {
       pointerDown.current = false;
@@ -168,12 +272,26 @@ function App() {
         const done = puzzleComplete(puzzle, completed);
         if (done) {
           setWon(true);
+          setVictoryHeadline(getVictoryHeadline());
           setBest(b => Math.max(b, level + 1));
-          if (!daily && !puzzleResultRecorded.current) {
+          if (!puzzleResultRecorded.current) {
             puzzleResultRecorded.current = true;
-            const elapsedSeconds = (Date.now() - puzzleStartedAt.current) / 1000;
-            const score = scorePuzzlePerformance({ puzzle, elapsedSeconds, ...puzzleMetrics.current });
-            setAdaptive(previous => ({ rating: updateAdaptiveRating(previous.rating, score), samples: previous.samples + 1 }));
+            const elapsedSeconds = Math.max(0, (activeElapsedMs.current + (activeSince.current === null ? 0 : Date.now() - activeSince.current)) / 1000);
+            const metrics = { ...puzzleMetrics.current };
+            const score = scorePuzzlePerformance({ puzzle, elapsedSeconds, ...metrics });
+            setAchievementMessage(getAchievementMessage({ level, score, elapsedSeconds, ...metrics }));
+            recordEvent('puzzle_complete', { level, elapsedSeconds: Math.round(elapsedSeconds), hints: metrics.hints, resets: metrics.resets, backtracks: metrics.backtracks, performanceScore: Math.round(score), difficulty: puzzle.difficulty?.score, variant: puzzle.difficulty?.variant, daily });
+            if (!daily) {
+              const fastSolve = elapsedSeconds <= 20 && metrics.hints === 0 && metrics.resets === 0;
+              setAdaptive(previous => {
+                const samples = previous.samples + 1;
+                const fastStreak = fastSolve ? Math.min(10, (previous.fastStreak || 0) + 1) : 0;
+                const adaptiveScore = fastSolve ? Math.max(score, 90) : score;
+                const rated = { ...previous, fastStreak, rating: updateAdaptiveRating(previous.rating, adaptiveScore, previous.samples), samples, uncertainty: ratingUncertainty(samples) };
+                const reward = variantRewardFromPerformance(score);
+                return recordVariantReward(rated, puzzle.difficulty?.variant || 'balanced', reward);
+              });
+            }
           }
           beep(760, 0.18);
         }
@@ -213,20 +331,63 @@ function App() {
     extendPath(activeId, point);
   };
 
-  const useHint = () => {
-    if (hints <= 0 || won) { notify(hints <= 0 ? 'No hints left' : 'Already solved'); return; }
+  const revealHint = (consumeTimedHint = true) => {
+    if (won) { notify('Already solved'); return false; }
     const segment = puzzle.segments.find(s => {
       const path = paths[s.id] || [];
-      return path.length < s.solution.length || !same(path.at(-1), s.end);
+      return !(path.length >= 2 && same(path[0], s.start) && same(path.at(-1), s.end));
     });
-    if (!segment) return;
+    if (!segment) { notify('Every path is connected'); return false; }
     const current = paths[segment.id] || [];
-    const nextPoint = segment.solution.find((p, i) => i >= current.length && !current.some(q => same(p, q)));
+    const reverse = current.length > 0 && same(current[0], segment.end);
+    const route = reverse ? [...segment.solution].reverse() : segment.solution;
+    const anchor = current.length ? current.at(-1) : route[0];
+    const anchorIndex = route.findIndex(point => same(point, anchor));
+    const nextPoint = anchorIndex >= 0 ? route[anchorIndex + 1] : null;
+    if (!nextPoint) {
+      const fallbackIndex = route.findIndex(point => !current.some(existing => same(existing, point)));
+      if (fallbackIndex < 0) { notify('Try completing this connection'); return false; }
+      setHintCell(route[fallbackIndex]);
+      setHintLine(null);
+    } else {
+      setHintCell(nextPoint);
+      setHintLine([anchor, nextPoint]);
+    }
     puzzleMetrics.current.hints += 1;
-    setHintCell(nextPoint || segment.solution[Math.min(current.length, segment.solution.length - 1)]);
-    setHints(h => h - 1);
-    notify('A little nudge');
+    if (consumeTimedHint) setHintUsage(consumeHint(hintUsage));
+    notify(consumeTimedHint ? 'Highlighted the next correct step' : 'Reward earned: bonus hint unlocked');
     beep(680, 0.1);
+    return true;
+  };
+
+  const useHint = async () => {
+    if (won) { notify('Already solved'); return; }
+    if (hints > 0) { revealHint(true); return; }
+    notify('Watch a short ad to earn one bonus hint. Your 3 hints refresh after 10 minutes.');
+    const rewarded = await showRewardedHintAd();
+    if (rewarded) {
+      revealHint(false);
+    } else {
+      notify('Rewarded ad unavailable right now. Your hints still refresh after 10 minutes.');
+    }
+  };
+
+  const advanceToNextPuzzle = () => installLevel(level + 1);
+
+  const shareChallenge = async () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('challenge', String(puzzle.seed ?? 0));
+    url.searchParams.set('level', String(level));
+    url.searchParams.set('size', String(puzzle.size));
+    url.searchParams.set('pairs', String(puzzle.segments.length));
+    try {
+      if (navigator.share) await navigator.share({ title: 'FLOW puzzle challenge', text: 'Can you solve this FLOW puzzle?', url: url.toString() });
+      else if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(url.toString()); notify('Challenge link copied'); }
+      else window.prompt('Copy this FLOW challenge link', url.toString());
+    } catch (error) {
+      if (error?.name !== 'AbortError') notify('Could not share right now');
+    }
+    setShowMenu(false);
   };
 
   const pathFor = (segment) => paths[segment.id] || [];
@@ -270,27 +431,28 @@ function App() {
       </header>
       <section className="relative z-10 mx-auto flex w-full max-w-5xl flex-col items-center px-4 pb-10 pt-5 sm:px-8 sm:pt-8">
         <div className="mb-5 flex items-center gap-3"><span className="level-pill">{daily?'DAILY':`LEVEL ${String(level).padStart(3,'0')}`}</span><span className="text-sm text-white/45">{puzzle.size} × {puzzle.size}</span></div>
-        <h1 className="mb-2 text-center text-4xl font-medium tracking-[-0.075em] sm:text-5xl">{won?'Perfectly connected.':'Find your flow.'}</h1>
+        <h1 className="mb-2 text-center text-4xl font-medium tracking-[-0.075em] sm:text-5xl">{won?victoryHeadline:'Find your flow.'}</h1>
         <p className="mb-7 text-center text-sm text-white/45 sm:mb-9">{won?'Every colour. Every cell.':'Connect each pair. Every square should belong to a path.'}</p>
         <div className="board-glass relative w-full max-w-[590px] rounded-[30px] p-3 sm:p-4" ref={boardRef}>
           <div className={`board-inner relative aspect-square w-full overflow-hidden rounded-[20px] ${won?'board-won':''}`} style={{'--size':puzzle.size}} onPointerMove={event=>{if(pointerDown.current&&activeId!==null){const point=cellFromTarget(document.elementFromPoint(event.clientX,event.clientY));if(point)onCellEnter(point)}}}>
             <GlassCanvas size={puzzle.size} activePath={activeGlassPath} />
             <div className="board-glow"/>
-            <svg className="path-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">{pathPoints.map(({segment,path})=><g key={segment.id} className={activeId===segment.id?'active-path':''}><path className="path-halo" d={pathD(path)} stroke={segment.color}/><path className="path-line" d={pathD(path)} stroke={segment.color}/></g>)}</svg>
+            <svg className="path-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">{hintLine&&<path className="hint-guide" d={pathD(hintLine)}/ >}{pathPoints.map(({segment,path})=><g key={segment.id} className={activeId===segment.id?'active-path':''}><path className="path-halo" d={pathD(path)} stroke={segment.color}/><path className="path-line" d={pathD(path)} stroke={segment.color}/></g>)}</svg>
             <div className="cell-grid" style={{gridTemplateColumns:`repeat(${puzzle.size},minmax(0,1fr))`}}>{grid.map(point=>{
               const endpoint=isEndpoint(point),owner=Object.entries(paths).find(([,path])=>path.some(p=>same(p,point)));
               const color=endpoint?.color||(owner?puzzle.segments.find(s=>s.id===Number(owner[0]))?.color:null),isHint=same(point,hintCell),isPathEnd=owner&&paths[Number(owner[0])]?.at(-1)&&same(paths[Number(owner[0])].at(-1),point);
-              return <div key={cellId(point)} data-cell={cellId(point)} className={`cell ${endpoint?'endpoint-cell':''} ${owner?'has-path':''} ${isHint?'hint-cell':''} ${isPathEnd?'path-end':''}`} onPointerDown={ev=>onCellPointerDown(ev,point)} style={{'--path-color':color||'transparent',borderRight:point.c===puzzle.size-1?0:undefined,borderBottom:point.r===puzzle.size-1?0:undefined}}>{endpoint&&<span className="endpoint-dot" style={{'--dot-color':endpoint.color}}><span/></span>}{isHint&&<span className="hint-pulse"/>}</div>
+              return <div key={cellId(point)} data-cell={cellId(point)} className={`cell ${endpoint?'endpoint-cell':''} ${owner?'has-path':''} ${isHint?'hint-cell':''} ${isPathEnd?'path-end':''}`} onPointerDown={ev=>onCellPointerDown(ev,point)} style={{'--path-color':color||'transparent',borderRight:point.c===puzzle.size-1?0:undefined,borderBottom:point.r===puzzle.size-1?0:undefined}}>{endpoint&&<span className="endpoint-dot" style={{'--dot-color':endpoint.color}} role="img" aria-label={`${endpoint.name} endpoint`}/>}{isHint&&<span className="hint-pulse"/>}</div>
             })}</div>
           </div>
-          {won&&<div className="win-overlay"><div className="win-orb">✦</div><h2 className="mt-4 text-2xl font-medium tracking-tight sm:text-3xl">Beautiful.</h2><p className="mt-2 text-sm text-white/55">You found every connection.</p><button className="next-button mt-6" onClick={()=>installLevel(level+1)}>Next puzzle <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div>}
+          {won&&<div className="win-overlay"><div className="win-orb">✦</div><h2 className="mt-4 text-2xl font-medium tracking-tight sm:text-3xl">{victoryHeadline}</h2><p className="mt-2 text-sm text-white/55">{achievementMessage}</p><button type="button" className="next-button mt-5" onClick={advanceToNextPuzzle}>Next puzzle <svg viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div>}
         </div>
-        <div className="mt-5 flex w-full max-w-[590px] items-center justify-between gap-4 px-1"><div className="flex min-w-0 flex-1 items-center gap-3"><div className="progress-track flex-1"><span style={{width:`${progress}%`}}/></div><span className="w-10 text-right text-xs tabular-nums text-white/50">{progress}%</span></div><button className="hint-button" onClick={useHint} disabled={won}><svg viewBox="0 0 24 24"><path d="M9 18h6m-5 3h4m-2-19a7 7 0 0 0-4 12.7c.6.4 1 1.1 1 1.8h6c0-.7.4-1.4 1-1.8A7 7 0 0 0 12 2Z"/></svg><span>Hint</span><span className="hint-number">{hints}</span></button></div>
+        <div className="mt-5 flex w-full max-w-[590px] items-center justify-between gap-4 px-1"><div className="flex min-w-0 flex-1 items-center gap-3"><div className="progress-track flex-1"><span style={{width:`${progress}%`}}/></div><span className="w-10 text-right text-xs tabular-nums text-white/50">{progress}%</span></div><button className="hint-button" onClick={useHint} disabled={won} aria-label={`Use hint. ${hints} remaining. Hints refresh every ${HINT_WINDOW_MS / 60000} minutes.`}><svg viewBox="0 0 24 24"><path d="M9 18h6m-5 3h4m-2-19a7 7 0 0 0-4 12.7c.6.4 1 1.1 1 1.8h6c0-.7.4-1.4 1-1.8A7 7 0 0 0 12 2Z"/></svg><span>Hint</span><span className="hint-number">{hints}</span></button></div>
         <div className="mt-4 flex items-center gap-2 text-[11px] tracking-wide text-white/30"><span className="status-dot"/>{solvedCount} of {puzzle.segments.length} paths connected</div>
         <p className="mt-2 text-[10px] tracking-wide text-white/25">Difficulty adapts to your pace.</p>
       </section>
       <footer className="relative z-10 mx-auto flex w-full max-w-5xl items-center justify-between px-5 pb-5 text-[10px] tracking-wide text-white/25 sm:px-8"><span>FLOW</span><span>{Math.max(0,best-1)} completed</span></footer>
-      {showMenu&&<div className="menu-backdrop" onClick={()=>setShowMenu(false)}><div className="menu-glass" onClick={ev=>ev.stopPropagation()}><button onClick={()=>installLevel(1)}>Restart from level one</button><button onClick={()=>installLevel(level,true)}>Daily puzzle</button><button onClick={()=>{setSound(v=>!v);setShowMenu(false)}}>{sound?'Sound off':'Sound on'}</button><p>Progress saves automatically.</p></div></div>}
+      {showMenu&&<div className="menu-backdrop" onClick={()=>setShowMenu(false)}><div className="menu-glass" onClick={ev=>ev.stopPropagation()}><button onClick={()=>installLevel(1)}>Restart from level one</button><button onClick={()=>installLevel(level,true)}>Daily puzzle</button><button onClick={()=>{setShowStats(true);setShowMenu(false)}}>Player stats</button><button onClick={shareChallenge}>Share this puzzle</button><button onClick={()=>{setReminderEnabled(v=>!v);setShowMenu(false);notify('In-app return reminder '+(!reminderEnabled?'on':'off'))}}>Return reminder: {reminderEnabled?'on':'off'}</button><button onClick={()=>{setSound(v=>!v);setShowMenu(false)}}>{sound?'Sound off':'Sound on'}</button><p>Stats stay on this device. Reminders are in-app only. FLOW works offline after its first load.</p></div></div>}
+      {showStats&&<div className="stats-backdrop" onClick={()=>setShowStats(false)}><section className="stats-panel" role="dialog" aria-modal="true" aria-label="Player stats" onClick={ev=>ev.stopPropagation()}><div className="stats-heading"><div><span className="stats-eyebrow">YOUR FLOW</span><h2>Player stats</h2></div><button onClick={()=>setShowStats(false)} aria-label="Close stats">×</button></div><div className="stats-rating"><span>Adaptive rating</span><strong>{adaptive.rating}<small>/100</small></strong><p>Estimated challenge fit · uncertainty ±{adaptive.uncertainty ?? ratingUncertainty(adaptive.samples)}</p></div><div className="stats-grid"><div><strong>{stats.completions}</strong><span>Puzzles solved</span></div><div><strong>{stats.averageSolveSeconds ? Math.floor(stats.averageSolveSeconds/60)+'m '+stats.averageSolveSeconds%60+'s' : '—'}</strong><span>Average solve</span></div><div><strong>{stats.returnDays}</strong><span>Days played</span></div><div><strong>{stats.abandonments}</strong><span>Unfinished</span></div><div><strong>{stats.hintsPerPuzzle}</strong><span>Hints per solve</span></div><div><strong>{stats.resetsPerPuzzle}</strong><span>Resets per solve</span></div></div><div className="stats-section"><h3>Difficulty feedback</h3><p>Too easy: {stats.feedback.easy} · Just right: {stats.feedback.balanced} · Too hard: {stats.feedback.hard}</p><p className="stats-note">Your analytics are stored locally in this browser. No account or network connection is needed.</p></div><button className="stats-close" onClick={()=>setShowStats(false)}>Back to puzzle</button></section></div>}
       {toast&&<div className="toast" role="status">{toast}</div>}
     </main>
   );
