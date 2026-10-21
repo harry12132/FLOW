@@ -1,12 +1,12 @@
 export const PALETTE = [
   { name: 'Red', value: '#ff595e' },
-  { name: 'Blue', value: '#1982c4' },
-  { name: 'Green', value: '#8ac926' },
-  { name: 'Purple', value: '#6a4c93' },
-  { name: 'Yellow', value: '#ffca3a' },
+  { name: 'Orange', value: '#ff9f1c' },
+  { name: 'Lime', value: '#c7f464' },
+  { name: 'Green', value: '#22c55e' },
+  { name: 'Cyan', value: '#00cfe8' },
+  { name: 'Blue', value: '#3a86ff' },
+  { name: 'Purple', value: '#8338ec' },
   { name: 'Pink', value: '#f15bb5' },
-  { name: 'Cyan', value: '#00bbf9' },
-  { name: 'Orange', value: '#ff924c' },
 ];
 
 const key = (p) => p.r * 100 + p.c;
