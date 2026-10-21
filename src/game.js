@@ -1,12 +1,12 @@
 export const PALETTE = [
-  { name: 'Coral', value: '#ef725f' },
-  { name: 'Ocean', value: '#4c91d8' },
-  { name: 'Mint', value: '#38a889' },
-  { name: 'Grape', value: '#9271d4' },
-  { name: 'Gold', value: '#d9a441' },
-  { name: 'Rose', value: '#d65c91' },
-  { name: 'Sky', value: '#4ab9c5' },
-  { name: 'Tangerine', value: '#e99549' },
+  { name: 'Red', value: '#ff595e' },
+  { name: 'Blue', value: '#1982c4' },
+  { name: 'Green', value: '#8ac926' },
+  { name: 'Purple', value: '#6a4c93' },
+  { name: 'Yellow', value: '#ffca3a' },
+  { name: 'Pink', value: '#f15bb5' },
+  { name: 'Cyan', value: '#00bbf9' },
+  { name: 'Orange', value: '#ff924c' },
 ];
 
 const key = (p) => p.r * 100 + p.c;
@@ -303,12 +303,13 @@ export function estimatePuzzleDifficulty(puzzle) {
 // solution, so solvability is guaranteed by construction and checked again before return.
 export function generateAdaptivePuzzle(level, profile = {}, seed = null, mode = 'adaptive', variant = 'balanced') {
   const rating = Math.max(0, Math.min(100, Number(profile.rating ?? 50)));
+  const fastStreak = Math.max(0, Math.min(10, Number(profile.fastStreak ?? 0)));
   const feedbackBias = Math.max(-12, Math.min(12, Number(profile.feedbackBias ?? 0)));
   const defaultSize = Math.min(8, 5 + Math.floor(Math.max(0, level - 1) / 18));
   const defaultPairs = Math.min(8, Math.max(3, 3 + Math.floor(level / 7)));
-  const sizeShift = mode === 'relaxed' ? -1 : mode === 'challenging' ? 1 : mode === 'standard' ? 0 : rating >= 88 ? 1 : rating <= 18 ? -1 : 0;
+  const sizeShift = mode === 'relaxed' ? -1 : mode === 'challenging' ? 1 : mode === 'standard' ? 0 : (rating >= 88 || fastStreak >= 2) ? 1 : rating <= 18 && fastStreak === 0 ? -1 : 0;
   const size = Math.max(5, Math.min(8, defaultSize + sizeShift));
-  const pairShift = mode === 'relaxed' ? -1 : mode === 'challenging' ? 1 : mode === 'standard' ? 0 : rating >= 72 ? 1 : rating <= 28 ? -1 : 0;
+  const pairShift = mode === 'relaxed' ? -1 : mode === 'challenging' ? 1 : mode === 'standard' ? 0 : (rating >= 72 || fastStreak >= 1) ? 1 : rating <= 28 ? -1 : 0;
   const pairCount = Math.max(3, Math.min(8, defaultPairs + pairShift, Math.floor((size * size) / 3)));
   const variantBias = mode === 'adaptive' ? ({ gentle: -7, balanced: 0, spicy: 7 }[variant] ?? 0) : 0;
   const modeBias = (mode === 'relaxed' ? -9 : mode === 'challenging' ? 9 : 0) + variantBias;
