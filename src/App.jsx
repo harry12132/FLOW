@@ -29,7 +29,7 @@ function App() {
   const [level, setLevel] = useState(Math.max(1, challengeParams?.level || initial.level || 1));
   const [best, setBest] = useState(initial.best || 1);
   const [sound, setSound] = useState(initial.sound !== false);
-  const [adaptive, setAdaptive] = useState(() => ({ rating: Math.max(0, Math.min(100, initial.adaptive?.rating ?? 50)), samples: initial.adaptive?.samples ?? 0, feedbackBias: initial.adaptive?.feedbackBias ?? 0, arms: initial.adaptive?.arms ?? {}, uncertainty: initial.adaptive?.uncertainty ?? ratingUncertainty(initial.adaptive?.samples ?? 0) }));
+  const [adaptive, setAdaptive] = useState(() => ({ rating: Math.max(0, Math.min(100, initial.adaptive?.rating ?? 50)), samples: initial.adaptive?.samples ?? 0, fastStreak: initial.adaptive?.fastStreak ?? 0, feedbackBias: initial.adaptive?.feedbackBias ?? 0, arms: initial.adaptive?.arms ?? {}, uncertainty: initial.adaptive?.uncertainty ?? ratingUncertainty(initial.adaptive?.samples ?? 0) }));
   const difficultyMode = 'adaptive';
   const [reminderEnabled, setReminderEnabled] = useState(initial.reminderEnabled === true);
   const [puzzle, setPuzzle] = useState(() => challengeParams
